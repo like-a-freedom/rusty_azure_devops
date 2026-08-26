@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "id": {
+      "type": "integer"
+    },
+    "comments": {
+      "items": {
+        "$ref": "#/$defs/CommentDto"
+      },
+      "type": "array"
+    },
+    "total": {
+      "type": "integer"
+    }
+  },
+  "required": ["id", "comments", "total"],
+  "title": "GetWorkitemCommentsResult",
+  "type": "object",
+  "$defs": {
+    "CommentDto": {
+      "properties": {
+        "id": {
+          "type": ["integer", "null"]
+        },
+        "author": {
+          "type": ["string", "null"]
+        },
+        "text": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["text"],
+      "type": "object"
+    }
+  }
+}

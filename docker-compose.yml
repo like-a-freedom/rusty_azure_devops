@@ -1,0 +1,27 @@
+services:
+  ado-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/<your-org>/rusty-azure-devops:latest
+    container_name: ado-mcp
+    stdin_open: true
+    tty: true
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      # For production, both ADO_TOKEN and ADO_BASE_URL must be set; the container will exit with an error if they are missing.
+      ADO_TOKEN: ${ADO_TOKEN:-""}
+      ADO_BASE_URL: ${ADO_BASE_URL:-""}
+      ADO_DEFAULT_PROJECT: ${ADO_DEFAULT_PROJECT:-""}
+      ADO_API_VERSION: ${ADO_API_VERSION:-""}
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.2'
+          memory: 256M

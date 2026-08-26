@@ -1,0 +1,58 @@
+{
+  "$defs": {
+    "WorkItemId": {
+      "anyOf": [
+        {
+          "format": "int64",
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "examples": [
+    {
+      "action": "add",
+      "attributes": {
+        "comment": "Linking as parent"
+      },
+      "link_type": "System.LinkTypes.Hierarchy-Forward",
+      "source_id": 100,
+      "target": 101
+    }
+  ],
+  "properties": {
+    "action": {
+      "type": "string"
+    },
+    "attributes": {
+      "additionalProperties": true,
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "link_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_id": {
+      "$ref": "#/$defs/WorkItemId"
+    },
+    "target": {
+      "$ref": "#/$defs/WorkItemId"
+    }
+  },
+  "required": [
+    "action",
+    "source_id",
+    "target"
+  ],
+  "title": "ManageWorkItemLinkParams",
+  "type": "object"
+}

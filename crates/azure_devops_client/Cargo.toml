@@ -1,0 +1,31 @@
+[package]
+name = "azure_devops_client"
+description = "HTTP client and trait abstraction for the Azure DevOps REST API (work items, projects, comments). Supports cloud and on-prem TFS with retry, fallback, and custom CA certificates."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+schemars = { version = "1.2.1", features = ["derive"] }
+thiserror = "2.0.18"
+serde_json = "1.0.150"
+async-trait = "0.1.89"
+rand = "0.10.2"
+tokio = { version = "1.52.3", features = ["time", "macros", "rt-multi-thread"] }
+url = "2.5.8"
+azure_devops_rust_api = { version = "0.38.0", features = ["wit", "core"] }
+azure_core = "1.1.0"
+# Small deps used for on-prem fallback requests
+base64 = "0.22.1"
+reqwest = { version = "0.13.4", features = ["json"] }
+
+[dev-dependencies]
+wiremock = "0.6.5"
+tokio = { version = "1.52.3", features = ["macros", "rt-multi-thread", "time"] }

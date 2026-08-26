@@ -1,0 +1,81 @@
+{
+  "$defs": {
+    "RelationsFormat": {
+      "enum": [
+        "ids",
+        "urls"
+      ],
+      "type": "string"
+    },
+    "WorkItemId": {
+      "anyOf": [
+        {
+          "format": "int64",
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "examples": [
+    {
+      "$expand": "relations",
+      "fields": null,
+      "id": 100,
+      "include_comments": false,
+      "include_description": false,
+      "relations_format": "ids"
+    }
+  ],
+  "properties": {
+    "$expand": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "fields": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "id": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WorkItemId"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "include_comments": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "include_description": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "relations_format": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RelationsFormat"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "title": "GetWorkItemParams",
+  "type": "object"
+}

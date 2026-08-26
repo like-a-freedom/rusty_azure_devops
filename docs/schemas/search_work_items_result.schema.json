@@ -1,0 +1,157 @@
+{
+  "$defs": {
+    "CommentDto": {
+      "properties": {
+        "author": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "type": "object"
+    },
+    "GetWorkItemResult": {
+      "properties": {
+        "comments": {
+          "items": {
+            "$ref": "#/$defs/CommentDto"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "fields": {
+          "$ref": "#/$defs/WorkItemFields"
+        },
+        "id": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "relations": {
+          "items": {
+            "$ref": "#/$defs/RelationDto"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "rev": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "fields"
+      ],
+      "type": "object"
+    },
+    "RelationAttributes": {
+      "properties": {
+        "comment": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RelationDto": {
+      "properties": {
+        "attributes": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RelationAttributes"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rel": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "rel"
+      ],
+      "type": "object"
+    },
+    "WorkItemFields": {
+      "additionalProperties": true,
+      "properties": {
+        "System.Description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "System.Title": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "details": {
+      "items": {
+        "$ref": "#/$defs/GetWorkItemResult"
+      },
+      "type": "array"
+    },
+    "ids": {
+      "items": {
+        "format": "int64",
+        "type": "integer"
+      },
+      "type": "array"
+    },
+    "total": {
+      "format": "uint",
+      "minimum": 0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "ids",
+    "total"
+  ],
+  "title": "SearchWorkItemsResult",
+  "type": "object"
+}

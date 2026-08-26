@@ -1,0 +1,24 @@
+# Azure DevOps MCP/CLI configuration
+# Copy this to config.yaml next to the binary and fill in real values.
+# Priority: CLI flags > environment variables > config.yaml > defaults
+
+# Required: Personal Access Token (PAT)
+ado_token: ""
+
+# Required: Azure DevOps base URL (cloud or on-prem)
+# Examples:
+#   Cloud:   https://dev.azure.com/yourorg
+#   On-prem: https://tfs.example.com/tfs/DefaultCollection
+ado_base_url: ""
+
+# Optional: Organization name (used with cloud URLs)
+ado_organization: ""
+
+# Optional: API version override
+# ado_api_version: "7.1"
+
+# Optional: Default project used when 'project' is not supplied to commands
+# ado_default_project: "MyProject"
+
+# Optional: Path to custom CA certificate (PEM or DER) for on-prem / self-signed servers
+# ado_ca_cert: "/path/to/corporate-root-ca.cer"

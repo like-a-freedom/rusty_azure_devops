@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "url": {
+      "type": ["string", "null"]
+    },
+    "project": {
+      "type": ["string", "null"]
+    },
+    "query_id": {
+      "type": ["string", "null"]
+    },
+    "offset": {
+      "type": ["integer", "null"]
+    },
+    "limit": {
+      "type": ["integer", "null"]
+    }
+  },
+  "title": "GetQueryParams",
+  "type": "object"
+}

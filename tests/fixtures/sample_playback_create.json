@@ -1,0 +1,27 @@
+[
+    {
+        "method": "POST",
+        "path": "/Demo/_apis/wit/workitems/$Task",
+        "status": 201,
+        "body": {
+            "id": 123,
+            "url": "https://ado/1/_workitems/123",
+            "fields": {
+                "System.Title": "created"
+            }
+        }
+    },
+    {
+        "method": "GET",
+        "path": "/_apis/projects",
+        "status": 200,
+        "body": {
+            "value": [
+                {
+                    "id": "1",
+                    "name": "Demo"
+                }
+            ]
+        }
+    }
+]

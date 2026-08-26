@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "id": {
+      "$ref": "#/$defs/WorkItemId"
+    }
+  },
+  "required": ["id"],
+  "title": "GetWorkitemCommentsParams",
+  "type": "object",
+  "$defs": {
+    "WorkItemId": {
+      "oneOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    }
+  }
+}

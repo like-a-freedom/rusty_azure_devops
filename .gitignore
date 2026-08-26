@@ -1,0 +1,43 @@
+# Build artifacts
+/target
+**/target
+**/*.rs.bk
+**/*.log
+
+# Local tooling and agent runtime
+/.vscode/
+!/.vscode/mcp.json.example
+/.scratch/
+/.commandcode/
+/.superpowers/
+/.opencode/
+/.cargo/
+
+# VCS and CI
+/.git
+/.github
+
+# Environment files (secrets)
+.env
+.env.*
+config.yaml
+
+# OS files
+.DS_Store
+*.pdb
+
+# Mutation testing outputs
+**/mutants.out*
+
+# Coverage artifacts
+cobertura.xml
+lcov.info
+*.profraw
+
+# Selected docs/ exclusions (everything else in docs/ is tracked)
+# Internal implementation plans, reviews, and agent instructions are not published.
+/docs/architecture-review*
+/docs/IMPLEMENTATION_PLAN.md
+/docs/agents/
+/docs/superpowers/
+/docs/internal/

@@ -1,0 +1,65 @@
+{
+  "$defs": {
+    "RelationsFormat": {
+      "enum": [
+        "ids",
+        "urls"
+      ],
+      "type": "string"
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "properties": {
+    "details": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "filters": {
+      "additionalProperties": true,
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "include_description": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "limit": {
+      "format": "uint",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "project": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "relations_format": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/RelationsFormat"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "wiql": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "title": "SearchWorkItemsParams",
+  "type": "object"
+}

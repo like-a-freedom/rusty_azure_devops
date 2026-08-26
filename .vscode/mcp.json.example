@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "ado-mcp": {
+      "command": "ado-mcp",
+      "args": [],
+      "env": {
+        "ADO_TOKEN": "${env:ADO_TOKEN}",
+        "ADO_BASE_URL": "https://dev.azure.com/yourorg",
+        "RUST_LOG": "info"
+      }
+    }
+  }
+}

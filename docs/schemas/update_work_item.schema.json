@@ -1,0 +1,65 @@
+{
+  "$defs": {
+    "WorkItemId": {
+      "anyOf": [
+        {
+          "format": "int64",
+          "type": "integer"
+        },
+        {
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "examples": [
+    {
+      "expected_rev": null,
+      "id": 100,
+      "patch": [
+        {
+          "op": "add",
+          "path": "/relations/-",
+          "value": {
+            "rel": "System.LinkTypes.Related",
+            "url": "https://dev.azure.com/yourorg/_apis/wit/workItems/200"
+          }
+        }
+      ]
+    }
+  ],
+  "properties": {
+    "expected_rev": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "id": {
+      "$ref": "#/$defs/WorkItemId"
+    },
+    "patch": {
+      "items": {
+        "type": "object"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "tags": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "title": "UpdateWorkItemParams",
+  "type": "object"
+}

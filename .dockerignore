@@ -1,0 +1,34 @@
+# Ignore build artifacts and local files
+/target
+**/*.rs.bk
+**/*.log
+
+# VCS and CI
+/.git
+/.github
+
+# Editor configs
+.vscode
+.idea
+
+# OS files
+.DS_Store
+
+# Environment files (secrets)
+.env
+.env.*
+
+# Tests and fixtures (not needed at runtime)
+/tests
+/tests/**
+
+# Examples and local dev helpers
+/examples
+
+# Node files if present
+node_modules
+
+# Do not include Dockerfile or Docker context build scripts
+# (we need the Dockerfile to build)
+
+AGENTS.md

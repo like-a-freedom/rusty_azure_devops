@@ -1,0 +1,15 @@
+[
+    {
+        "method": "GET",
+        "path": "/_apis/projects",
+        "status": 200,
+        "body": {
+            "value": [
+                {
+                    "id": "1",
+                    "name": "Demo"
+                }
+            ]
+        }
+    }
+]
