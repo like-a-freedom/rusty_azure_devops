@@ -8,7 +8,7 @@
 
 ## Release Steps
 
-1. **Update version** in both `crates/*/Cargo.toml`
+1. **Update version** in `[workspace.package]` in the root `Cargo.toml` (both crates inherit it via `version.workspace = true`)
 2. **Run quality gates:**
    ```bash
    cargo check --workspace
