@@ -53,6 +53,38 @@ impl AzureSdkClient {
     }
 }
 
+/// Merge flat-query hits (`workItems`) with tree/oneHop hits
+/// (`workItemRelations` source + target) into one deduplicated ID list.
+/// Flat results come first; relation order is preserved after them.
+/// `source` is `None` for top-level rows — only `target` carries the ID.
+fn merge_query_result_ids(
+    work_items: Vec<wit::models::WorkItemReference>,
+    relations: Vec<wit::models::WorkItemLink>,
+) -> Vec<i64> {
+    use std::collections::HashSet;
+    let mut seen: HashSet<i64> = HashSet::new();
+    let mut out: Vec<i64> = Vec::new();
+    for it in work_items {
+        if let Some(id) = it.id {
+            let id = id as i64;
+            if seen.insert(id) {
+                out.push(id);
+            }
+        }
+    }
+    for link in relations {
+        for endpoint in [link.source, link.target].into_iter().flatten() {
+            if let Some(id) = endpoint.id {
+                let id = id as i64;
+                if seen.insert(id) {
+                    out.push(id);
+                }
+            }
+        }
+    }
+    out
+}
+
 /// Builder for `AzureSdkClient`. All fields are optional except the
 /// constructor args (`endpoint`, `pat`, `org`) which are required.
 pub struct AzureSdkClientBuilder {
@@ -553,11 +585,7 @@ impl AzureDevOpsClient for AzureSdkClient {
                 }
             })
             .await?;
-        Ok(resp
-            .work_items
-            .into_iter()
-            .filter_map(|it| it.id.map(|id| id as i64))
-            .collect())
+        Ok(merge_query_result_ids(resp.work_items, resp.work_item_relations))
     }
 
     async fn batch_get_work_items(
@@ -973,5 +1001,41 @@ mod regression_tests {
         let projects = result.unwrap();
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].name, "P1");
+    }
+
+    #[test]
+    fn merge_query_ids_flat_only() {
+        let items = vec![
+            wit::models::WorkItemReference { id: Some(1), url: None },
+            wit::models::WorkItemReference { id: Some(2), url: None },
+        ];
+        assert_eq!(merge_query_result_ids(items, vec![]), vec![1, 2]);
+    }
+
+    #[test]
+    fn merge_query_ids_onehop_null_source() {
+        // Shape seen on-prem for XDR Q1 2027 (oneHop): empty workItems,
+        // relations with null source and IDs in target.
+        let rel = |id: i32| wit::models::WorkItemLink {
+            rel: None,
+            source: None,
+            target: Some(wit::models::WorkItemReference { id: Some(id), url: None }),
+        };
+        let relations = vec![rel(8243728), rel(10729324)];
+        assert_eq!(
+            merge_query_result_ids(vec![], relations),
+            vec![8243728, 10729324]
+        );
+    }
+
+    #[test]
+    fn merge_query_ids_dedups_flat_source_target() {
+        let items = vec![wit::models::WorkItemReference { id: Some(7), url: None }];
+        let relations = vec![wit::models::WorkItemLink {
+            rel: Some("System.LinkTypes.Hierarchy-Forward".to_string()),
+            source: Some(wit::models::WorkItemReference { id: Some(7), url: None }),
+            target: Some(wit::models::WorkItemReference { id: Some(9), url: None }),
+        }];
+        assert_eq!(merge_query_result_ids(items, relations), vec![7, 9]);
     }
 }
