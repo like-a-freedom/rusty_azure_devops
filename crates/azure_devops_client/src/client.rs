@@ -897,7 +897,7 @@ mod tests {
 mod regression_tests {
     use super::*;
     use crate::AzureDevOpsClient;
-    use wiremock::matchers::{method, path, query_param};
+    use wiremock::matchers::{method, path, path_regex, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
@@ -1037,5 +1037,40 @@ mod regression_tests {
             target: Some(wit::models::WorkItemReference { id: Some(9), url: None }),
         }];
         assert_eq!(merge_query_result_ids(items, relations), vec![7, 9]);
+    }
+
+    #[tokio::test]
+    async fn query_by_id_merges_onehop_relation_ids() {
+        // On-prem oneHop shape: empty `workItems`, IDs in
+        // `workItemRelations` with null source on top-level rows.
+        // Guards the query_by_id -> merge_query_result_ids wire-in:
+        // collecting work_items only would return [] here.
+        let mock = MockServer::start().await;
+        let endpoint = format!("{}/tfs/DefaultCollection", mock.uri());
+
+        Mock::given(method("GET"))
+            .and(path_regex(r"/_apis/wit/wiql/q1$"))
+            .and(query_param("api-version", "6.0"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "queryType": "oneHop",
+                "queryResultType": "workItemLink",
+                "workItems": [],
+                "workItemRelations": [
+                    {"rel": null, "source": null, "target": {"id": 8243728}},
+                    {"rel": "System.LinkTypes.Hierarchy-Forward",
+                     "source": {"id": 8243728},
+                     "target": {"id": 10729324}}
+                ]
+            })))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        let client = AzureSdkClient::builder(endpoint, "fake-pat", "")
+            .api_version("6.0")
+            .build();
+        let result = client.query_by_id("Corp-SecurityCenter", "q1").await;
+        assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
+        assert_eq!(result.unwrap(), vec![8243728, 10729324]);
     }
 }

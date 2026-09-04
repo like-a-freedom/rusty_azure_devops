@@ -497,6 +497,15 @@ mod tests {
     }
 
     #[test]
+    fn format_query_results_empty_page_beyond_total() {
+        let result = GetQueryResult {
+            ids: vec![],
+            total: 312,
+        };
+        format_query_results(&result, false);
+    }
+
+    #[test]
     fn format_query_results_json() {
         let result = GetQueryResult {
             ids: vec![1, 2],

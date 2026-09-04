@@ -177,4 +177,14 @@ mod tests {
         assert_eq!(project, "MyProject");
         assert_eq!(query_id, "1c3ed7b3-17bb-4fe9-9b64-256f118ebebf");
     }
+
+    #[test]
+    fn test_parse_query_url_view_form_with_slash_and_params() {
+        let result = parse_query_url(
+            "https://host/tfs/Collection/MyProject/_queries/query/1c3ed7b3-17bb-4fe9-9b64-256f118ebebf/?view=results",
+        );
+        let (project, query_id) = result.unwrap();
+        assert_eq!(project, "MyProject");
+        assert_eq!(query_id, "1c3ed7b3-17bb-4fe9-9b64-256f118ebebf");
+    }
 }
