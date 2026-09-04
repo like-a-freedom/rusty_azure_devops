@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- `get-query-results` now includes `workItemRelations` IDs, so tree/oneHop saved queries no longer return an empty list
+- `get-query-results` accepts `/_queries/query-edit/GUID` saved-query URLs in addition to `/_queries/query/GUID`
+- Empty `get-query-results` output tells whether the query returned nothing or the page offset skipped past the total
+
 ## [0.2.0] - 2026-08-26
 
 ### Added

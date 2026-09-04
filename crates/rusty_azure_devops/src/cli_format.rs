@@ -182,13 +182,29 @@ pub fn format_add_comment_result(result: &AddCommentResult, json: bool) {
     }
 }
 
+/// Human-readable message for an empty saved-query page.
+/// Distinguishes "the query returned nothing" from "the page offset skipped
+/// past the total". Flat, tree, and oneHop queries are all supported — an
+/// empty result means the saved query itself has no rows on this page.
+pub fn empty_query_results_message(total: usize) -> String {
+    if total == 0 {
+        "No work item IDs found (total: 0). The saved query returned no rows. \
+         Verify the query GUID/project and that the query returns rows in TFS."
+            .to_string()
+    } else {
+        format!(
+            "No work item IDs on this page (total: {total}). Lower --offset below {total}."
+        )
+    }
+}
+
 pub fn format_query_results(result: &GetQueryResult, json: bool) {
     if json {
         format_json(result);
         return;
     }
     if result.ids.is_empty() {
-        println!("No work item IDs found (total: {}).", result.total);
+        println!("{}", empty_query_results_message(result.total));
     } else {
         println!(
             "Found {} work item IDs (total: {}): {:?}",
@@ -487,5 +503,19 @@ mod tests {
             total: 10,
         };
         format_query_results(&result, true);
+    }
+
+    #[test]
+    fn empty_query_message_zero_total() {
+        let msg = empty_query_results_message(0);
+        assert!(msg.contains("total: 0"), "unexpected message: {msg}");
+        assert!(msg.contains("TFS"), "unexpected message: {msg}");
+    }
+
+    #[test]
+    fn empty_query_message_page_beyond_total() {
+        let msg = empty_query_results_message(312);
+        assert!(msg.contains("312"), "unexpected message: {msg}");
+        assert!(msg.contains("--offset"), "unexpected message: {msg}");
     }
 }
