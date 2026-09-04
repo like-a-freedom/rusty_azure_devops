@@ -20,21 +20,21 @@ name = "ado-cli"
 path = "src/bin/cli.rs"
 
 [dependencies]
-rmcp = { version = "3.1.0", features = [
+rmcp = { version = "3.2.0", features = [
     "server",
     "client",
     "macros",
     "transport-io",
     "transport-child-process",
 ] }
-serde = { version = "1.0.228", features = ["derive"] }
-schemars = { version = "1.2.1", features = ["derive"] }
-serde_json = "1.0.150"
+serde = { version = "1.0.229", features = ["derive"] }
+schemars = { version = "1.2.2", features = ["derive"] }
+serde_json = "1.0.151"
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 azure_devops_client = { path = "../azure_devops_client" }
-tokio = { version = "1.52.3", features = ["sync", "rt-multi-thread", "macros"] }
-htmd = "0.5.4"
+tokio = { version = "1.53.1", features = ["sync", "rt-multi-thread", "macros"] }
+htmd = "0.5.5"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
 clap = { version = "4", features = ["derive"] }
 serde_yaml = "0.9"
@@ -42,12 +42,12 @@ url = "2.5.8"
 
 
 [dev-dependencies]
-rmcp = { version = "3.1.0", features = [
+rmcp = { version = "3.2.0", features = [
     "client",
     "transport-child-process",
     "transport-io",
 ] }
-async-trait = "0.1.89"
-jsonschema = "0.47.0"
+async-trait = "0.1.92"
+jsonschema = "0.53.0"
 assert_cmd = "2.2.2"
 predicates = "3.1.4"

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-09-04
+
+### Changed
+- Dependency upgrades to latest available versions: azure_devops_rust_api 0.39.1, base64 0.23.1, jsonschema 0.53.0, rmcp 3.2.0, tokio 1.53.1, serde 1.0.229, schemars 1.2.2, thiserror 2.0.20, serde_json 1.0.151, async-trait 0.1.92, htmd 0.5.5, serde_yaml 0.9.34, pulldown-cmark 0.13.4 (all 207 tests green, no source changes required)
+
 ## [0.2.1] - 2026-09-04
 
 ### Fixed
