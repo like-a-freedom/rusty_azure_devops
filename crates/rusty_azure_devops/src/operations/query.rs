@@ -47,7 +47,7 @@ fn resolve_query_params(
             "project is required when query_id is provided. Provide project or pass a full query URL instead.",
         ))),
         (None, None, None) => Err(AzureError::Http(HttpError::decode(
-            "provide either a query URL (e.g. .../Project/_queries/query/GUID) or (project, query_id). Example URL: https://tfs.example.com/tfs/Collection/MyProject/_queries/query/1c3ed7b3-17bb-4fe9-9b64-256f118ebebf",
+            "provide either a query URL (e.g. .../Project/_queries/query/GUID or .../Project/_queries/query-edit/GUID) or (project, query_id). Example URL: https://tfs.example.com/tfs/Collection/MyProject/_queries/query/1c3ed7b3-17bb-4fe9-9b64-256f118ebebf",
         ))),
     }
 }
@@ -58,13 +58,20 @@ fn parse_query_url(url_str: &str) -> Result<(String, String), AzureError> {
     })?;
     let path = parsed.path();
 
-    let marker = "/_queries/query/";
-    let idx = path.find(marker).ok_or_else(|| {
-        AzureError::Http(HttpError::decode(format!(
-            "URL does not contain '/_queries/query/' segment: {}. Expected format: https://host/Project/_queries/query/QUERY_GUID",
-            url_str
-        )))
-    })?;
+    // TFS serves two URL shapes for the same saved query: `/_queries/query/GUID`
+    // (view) and `/_queries/query-edit/GUID` (edit mode). Match the longer
+    // marker first so the shared `/_queries/query` prefix cannot shadow it.
+    // (`find_map`, not `filter_map().next()` — the latter trips
+    // `clippy::filter_map_next` under `-D warnings`.)
+    let (marker_len, idx) = ["/_queries/query-edit/", "/_queries/query/"]
+        .iter()
+        .find_map(|marker| path.find(marker).map(|i| (marker.len(), i)))
+        .ok_or_else(|| {
+            AzureError::Http(HttpError::decode(format!(
+                "URL does not contain a '/_queries/query/' or '/_queries/query-edit/' segment: {}. Expected format: https://host/Project/_queries/query/QUERY_GUID",
+                url_str
+            )))
+        })?;
 
     let project = path[..idx].rsplit('/').next().ok_or_else(|| {
         AzureError::Http(HttpError::decode(format!(
@@ -73,7 +80,7 @@ fn parse_query_url(url_str: &str) -> Result<(String, String), AzureError> {
         )))
     })?;
 
-    let query_id = path[idx + marker.len()..].trim_end_matches('/');
+    let query_id = path[idx + marker_len..].trim_end_matches('/');
     if project.is_empty() || query_id.is_empty() {
         return Err(AzureError::Http(HttpError::decode(format!(
             "invalid query URL: {} (empty project or query id)",
@@ -149,5 +156,25 @@ mod tests {
     fn test_resolve_query_params_nothing() {
         let result = resolve_query_params(None, None, None);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_query_url_edit_form() {
+        let result = parse_query_url(
+            "https://hqrndtfs.avp.ru/tfs/DefaultCollection/Corp-SecurityCenter/_queries/query-edit/5b8ca874-776d-4bff-ba1e-0eaab60fa29c/",
+        );
+        let (project, query_id) = result.unwrap();
+        assert_eq!(project, "Corp-SecurityCenter");
+        assert_eq!(query_id, "5b8ca874-776d-4bff-ba1e-0eaab60fa29c");
+    }
+
+    #[test]
+    fn test_parse_query_url_edit_form_with_params() {
+        let result = parse_query_url(
+            "https://host/tfs/Collection/MyProject/_queries/query-edit/1c3ed7b3-17bb-4fe9-9b64-256f118ebebf?view=results",
+        );
+        let (project, query_id) = result.unwrap();
+        assert_eq!(project, "MyProject");
+        assert_eq!(query_id, "1c3ed7b3-17bb-4fe9-9b64-256f118ebebf");
     }
 }

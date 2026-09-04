@@ -248,7 +248,7 @@ enum Command {
         text: String,
     },
 
-    #[doc = "Execute a saved Azure DevOps query by URL or (project, query_id).\nReturns work item IDs. Supports query URLs from both on-prem and cloud.\n\nExamples:\n  ado-cli get-query-results --url 'https://host/Project/_queries/query/GUID'\n  ado-cli get-query-results --project MyProject --query-id '1c3ed7b3-...'\n  ado-cli get-query-results --url '...' --offset 200 --limit 100"]
+    #[doc = "Execute a saved Azure DevOps query by URL or (project, query_id).\nReturns work item IDs. Supports query URLs from both on-prem and cloud.\nAccepts both '.../_queries/query/GUID' and '.../_queries/query-edit/GUID' URL shapes.\n\nExamples:\n  ado-cli get-query-results --url 'https://host/Project/_queries/query/GUID'\n  ado-cli get-query-results --project MyProject --query-id '1c3ed7b3-...'\n  ado-cli get-query-results --url '...' --offset 200 --limit 100"]
     GetQueryResults {
         /// Full query URL (e.g. https://host/Project/_queries/query/GUID).
         #[arg(long)]
