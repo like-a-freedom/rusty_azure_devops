@@ -270,6 +270,25 @@ fn saved_file_is_owner_only_on_unix() {
 }
 
 #[test]
+fn malformed_base_url_is_rejected_before_any_network() {
+    let home = unique_home("badurl");
+    let mut cmd = login_cmd(&home);
+    // NOTE: no --no-verify — the shape check must fire before any network
+    // attempt, so this stays fast with no server involved.
+    cmd.args(["login", "--base-url", "not a url", "--token", "x", "--json"]);
+    let out = cmd.assert().code(1).get_output().clone();
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(v["ok"].as_bool(), Some(false));
+    assert_eq!(v["reason"], "validation_failed");
+    assert!(out.stdout.is_empty());
+    assert!(
+        !user_config(&home).exists(),
+        "nothing must be saved on failure"
+    );
+    std::fs::remove_dir_all(&home).ok();
+}
+
+#[test]
 fn token_and_token_stdin_conflict_is_a_usage_error() {
     let home = unique_home("conflict");
     let mut cmd = login_cmd(&home);

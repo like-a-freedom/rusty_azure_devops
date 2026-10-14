@@ -175,6 +175,9 @@ pub struct LogoutResult {
 const URL_HINT: &str = "re-run with --base-url URL (or set ADO_BASE_URL)";
 const TOKEN_HINT: &str = "re-run with --token PAT, --token-stdin (pipe), or set ADO_TOKEN";
 const NON_TTY_HINT: &str = "no TTY for interactive prompts — pass flags, --token-stdin, or env";
+const STDIN_HINT: &str =
+    "pipe the PAT via stdin: echo \"$ADO_TOKEN\" | ado-cli login --base-url URL --token-stdin ...";
+const SAVE_HINT: &str = "set HOME and check permissions on ~/.config/rusty_azure_devops";
 
 /// Run the full login flow: guard → resolve → validate → save.
 pub async fn run_login(params: LoginParams) -> Result<LoginResult, CommandError> {
@@ -198,7 +201,7 @@ pub async fn run_login(params: LoginParams) -> Result<LoginResult, CommandError>
     let stdin_token = if params.token_stdin {
         Some(
             read_token_stdin()
-                .map_err(|d| CommandError::new("missing_value", d, NON_TTY_HINT.to_string()))?,
+                .map_err(|d| CommandError::new("missing_value", d, STDIN_HINT.to_string()))?,
         )
     } else {
         None
@@ -236,6 +239,17 @@ pub async fn run_login(params: LoginParams) -> Result<LoginResult, CommandError>
         _ => prompt_password("Personal Access Token (PAT, input hidden)")
             .map_err(|d| CommandError::new("io_error", d, NON_TTY_HINT.to_string()))?,
     };
+
+    // Shape-check the URL up front (not a network call, so it applies even
+    // with --no-verify): a malformed URL would otherwise panic inside the
+    // client builder (exit 101, no envelope).
+    url::Url::parse(&url).map_err(|e| {
+        CommandError::new(
+            "validation_failed",
+            format!("invalid base URL {url:?}: {e} (not saved)"),
+            "pass a full URL, e.g. https://tfs.example.com/tfs/DefaultCollection".to_string(),
+        )
+    })?;
 
     // 3. Validate exactly what gets saved (no env leakage into validation).
     let mut validated = false;
@@ -285,13 +299,8 @@ pub async fn run_login(params: LoginParams) -> Result<LoginResult, CommandError>
         ado_default_project: params.project.clone(),
         ado_ca_cert: params.ca_cert.clone(),
     };
-    let config_path = save_user_config(&yaml).map_err(|d| {
-        CommandError::new(
-            "io_error",
-            d,
-            "check permissions on ~/.config/rusty_azure_devops".to_string(),
-        )
-    })?;
+    let config_path = save_user_config(&yaml)
+        .map_err(|d| CommandError::new("io_error", d, SAVE_HINT.to_string()))?;
     let shadow_warning = shadow_note(&config_path);
     Ok(LoginResult {
         config_path,
