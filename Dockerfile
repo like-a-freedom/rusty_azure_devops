@@ -13,6 +13,14 @@ COPY Cargo.toml Cargo.lock ./
 COPY crates/azure_devops_client/Cargo.toml crates/azure_devops_client/
 COPY crates/rusty_azure_devops/Cargo.toml crates/rusty_azure_devops/
 
+# Only manifests exist at this layer, so cargo cannot see any targets yet.
+# Create placeholder targets so `cargo fetch` can resolve the workspace.
+RUN mkdir -p crates/azure_devops_client/src crates/rusty_azure_devops/src/bin \
+    && echo "" > crates/azure_devops_client/src/lib.rs \
+    && echo "" > crates/rusty_azure_devops/src/lib.rs \
+    && echo "fn main() {}" > crates/rusty_azure_devops/src/main.rs \
+    && echo "fn main() {}" > crates/rusty_azure_devops/src/bin/cli.rs
+
 # Fetch dependencies (improves caching)
 RUN cargo fetch
 

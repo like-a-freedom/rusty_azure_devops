@@ -77,19 +77,19 @@ jobs:
           - os_name: Linux-x86_64
             os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            bin: rusty_azure_devops_linux_x86_64
+            suffix: linux-x86_64
           - os_name: macOS-x86_64
             os: macos-latest
             target: x86_64-apple-darwin
-            bin: rusty_azure_devops_macos_x86_64
+            suffix: macos-x86_64
           - os_name: macOS-aarch64
             os: macos-latest
             target: aarch64-apple-darwin
-            bin: rusty_azure_devops_macos_aarch64
+            suffix: macos-aarch64
           - os_name: Windows-x86_64
             os: windows-latest
             target: x86_64-pc-windows-msvc
-            bin: rusty_azure_devops_windows_x86_64.exe
+            suffix: windows-x86_64
     steps:
       - uses: actions/checkout@v7.0.1
 
@@ -116,41 +116,37 @@ jobs:
           path: target/${{ matrix.platform.target }}
           key: ${{ runner.os }}-cargo-target-${{ matrix.platform.target }}-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Build binary
+      - name: Build binaries
         run: cargo build -p rusty_azure_devops --release --target ${{ matrix.platform.target }}
 
-      - name: Prepare artifact (Unix)
+      # The package ships two binaries (ado-mcp, ado-cli); publish both.
+      - name: Prepare artifacts (Unix)
         if: matrix.platform.os != 'windows-latest'
         run: |
-          mkdir -p app/${{ matrix.platform.target }}
-          cp target/${{ matrix.platform.target }}/release/rusty_azure_devops app/${{ matrix.platform.target }}/${{ matrix.platform.bin }}
+          mkdir -p app
+          for b in ado-mcp ado-cli; do
+            out="app/${b}_${{ matrix.platform.suffix }}"
+            cp "target/${{ matrix.platform.target }}/release/$b" "$out"
+            shasum -a 256 "$out" | cut -d ' ' -f 1 > "$out.sha256"
+          done
 
-      - name: Prepare artifact (Windows)
+      - name: Prepare artifacts (Windows)
         if: matrix.platform.os == 'windows-latest'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path app/${{ matrix.platform.target }}
-          Copy-Item target/${{ matrix.platform.target }}/release/rusty_azure_devops.exe app/${{ matrix.platform.target }}/${{ matrix.platform.bin }}
-
-      - name: Generate SHA-256 (Unix)
-        if: matrix.platform.os != 'windows-latest'
-        run: |
-          shasum -a 256 app/${{ matrix.platform.target }}/${{ matrix.platform.bin }} | cut -d ' ' -f 1 > app/${{ matrix.platform.target }}/${{ matrix.platform.bin }}.sha256
-
-      - name: Generate SHA-256 (Windows)
-        if: matrix.platform.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          (Get-FileHash -Algorithm SHA256 app/${{ matrix.platform.target }}/${{ matrix.platform.bin }}).Hash.ToLower() | Out-File -Encoding ascii app/${{ matrix.platform.target }}/${{ matrix.platform.bin }}.sha256
+          New-Item -ItemType Directory -Force -Path app | Out-Null
+          foreach ($b in @('ado-mcp', 'ado-cli')) {
+            $out = "app/${b}_${{ matrix.platform.suffix }}.exe"
+            Copy-Item "target/${{ matrix.platform.target }}/release/$b.exe" $out
+            (Get-FileHash -Algorithm SHA256 $out).Hash.ToLower() | Out-File -Encoding ascii "$out.sha256"
+          }
 
       - name: Upload release assets
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v3.0.3
         with:
           tag_name: ${{ github.ref_name }}
-          files: |
-            app/${{ matrix.platform.target }}/${{ matrix.platform.bin }}
-            app/${{ matrix.platform.target }}/${{ matrix.platform.bin }}.sha256
+          files: app/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
