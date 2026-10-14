@@ -15,7 +15,6 @@
 
 # VCS and CI
 /.git
-/.github
 
 # Environment files (secrets)
 .env
