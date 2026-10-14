@@ -138,6 +138,9 @@ fn tool_enum_covers_all_cli_commands() {
 
     // (CLI subcommand name, expected Tool variant).
     // Keep this list in sync with the `Command` enum in bin/cli.rs.
+    // login/logout are CLI-only auth UX (like `gcx login`, `pangolin
+    // login/logout`, `keenable login/logout`) and intentionally absent here:
+    // local secret ops must not become MCP tools.
     let cli_to_tool: &[(&str, &str)] = &[
         ("status", "get_status"),
         ("list-projects", "list_projects"),
@@ -159,6 +162,19 @@ fn tool_enum_covers_all_cli_commands() {
             cli_cmd,
             expected_tool,
             tool_names,
+        );
+    }
+
+    /// CLI-only commands with no MCP tool mirror. If a Tool variant ever
+    /// appears for one of these, this fails loudly: local secret ops must
+    /// stay out of the MCP surface.
+    const CLI_ONLY: &[&str] = &["login", "logout"];
+
+    for cli_cmd in CLI_ONLY {
+        assert!(
+            !tool_names.contains(cli_cmd),
+            "CLI-only '{}' must not gain an MCP tool (local secret op)",
+            cli_cmd,
         );
     }
 }

@@ -2,10 +2,10 @@ use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 
 use rusty_azure_devops::{
-    build_create_work_item_params, config::Config, create_modules, domain::*,
+    LoginParams, build_create_work_item_params, config::Config, create_modules, domain::*,
     format_add_comment_result, format_comments, format_create_result, format_link_result,
     format_list_projects, format_query_results, format_search, format_status, format_work_item,
-    parse_work_item_id,
+    parse_work_item_id, run_login, run_logout,
 };
 
 fn parse_key_value(s: &str) -> Result<(String, Value), String> {
@@ -53,7 +53,7 @@ fn parse_relation(s: &str) -> Result<RelationDto, String> {
 
 /// Azure DevOps CLI client. Agent-first tool for work item, project, and
 /// comment operations. All commands accept --json for machine-readable output.
-/// Credentials: --token flag, ADO_TOKEN env var, or config.yaml. See status.
+/// Credentials: ado-cli login (recommended), --token flag, ADO_TOKEN env var, or config.yaml. See status.
 #[derive(Parser)]
 #[command(name = "ado-cli", version, about = "Azure DevOps CLI client")]
 struct Cli {
@@ -77,6 +77,51 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    #[doc = "Log in: save PAT + server URL to ~/.config/rusty_azure_devops/config.yaml.\nPrompts for missing --base-url / --token (TTY only, token input hidden).\nHeadless/agents: pass --base-url with --token, --token-stdin (pipe), or ADO_TOKEN env.\nValidates against the server before saving (skip with --no-verify).\nRefuses to overwrite an existing config without --force (exit 3).\nExit codes: 0 ok, 2 usage, 3 needs --force, 1 other failures.\n\nExamples:\n  ado-cli login\n  ado-cli login --base-url https://tfs.example.com/tfs/DefaultCollection\n  echo \"$PAT\" | ado-cli login --base-url https://host/tfs/Coll --token-stdin --json\n  ADO_TOKEN=pat123 ado-cli login --base-url https://host/tfs/Coll --no-verify\n  ado-cli login --base-url https://dev.azure.com/myorg --organization myorg --project Demo --force"]
+    Login {
+        /// Base URL (e.g. https://tfs.example.com/tfs/DefaultCollection or https://dev.azure.com/myorg).
+        /// Falls back to ADO_BASE_URL env, then prompts (TTY only).
+        #[arg(long)]
+        base_url: Option<String>,
+
+        /// Personal Access Token. Falls back to ADO_TOKEN env, then prompts (hidden input, TTY only).
+        /// Prefer ADO_TOKEN env or --token-stdin in automation: argv is visible in `ps` and shell history.
+        #[arg(long, conflicts_with = "token_stdin")]
+        token: Option<String>,
+
+        /// Read the PAT from stdin (e.g. `echo "$PAT" | ado-cli login --token-stdin ...`).
+        /// Preferred over --token in scripts/agents.
+        #[arg(long)]
+        token_stdin: bool,
+
+        /// Organization name (cloud only; saved as ado_organization).
+        #[arg(long)]
+        organization: Option<String>,
+
+        /// Default project (saved as ado_default_project; used when commands omit --project).
+        #[arg(long)]
+        project: Option<String>,
+
+        /// REST API version override (e.g. '6.0'; saved as ado_api_version).
+        #[arg(long)]
+        api_version: Option<String>,
+
+        /// Path to custom CA certificate (PEM/DER) for on-prem servers (saved as ado_ca_cert).
+        #[arg(long)]
+        ca_cert: Option<String>,
+
+        /// Overwrite existing config without error.
+        #[arg(long)]
+        force: bool,
+
+        /// Skip server validation (save without a network call).
+        #[arg(long)]
+        no_verify: bool,
+    },
+
+    #[doc = "Log out: delete ~/.config/rusty_azure_devops/config.yaml."]
+    Logout {},
+
     #[doc = "Get server status. Shows connection health, project count, and configured default project.\nAlso shows config with --show-secrets (token presence, base URL, default project)."]
     Status {
         /// Show non-sensitive config: token presence, base URL, default project.
@@ -272,9 +317,98 @@ enum Command {
     },
 }
 
+/// Auth dispatch: `login`/`logout` run before any credential check, because on
+/// first run there is no config yet for `Config::load_with_overrides` to read.
+async fn dispatch_auth(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    match cli.command {
+        Command::Login {
+            base_url,
+            token,
+            token_stdin,
+            organization,
+            project,
+            api_version,
+            ca_cert,
+            force,
+            no_verify,
+        } => {
+            match run_login(LoginParams {
+                base_url,
+                token,
+                token_stdin,
+                organization,
+                project,
+                api_version,
+                ca_cert,
+                force,
+                no_verify,
+            })
+            .await
+            {
+                Ok(r) => {
+                    if cli.json {
+                        println!(
+                            "{}",
+                            serde_json::json!({
+                                "ok": true,
+                                "config_path": r.config_path,
+                                "base_url": r.base_url,
+                                "validated": r.validated,
+                                "project_count": r.project_count,
+                                "shadow_warning": r.shadow_warning,
+                                "next": "ado-cli status --include-projects",
+                            })
+                        );
+                    } else {
+                        println!("Saved to {} (mode 0600).", r.config_path.display());
+                        if r.validated {
+                            println!(
+                                "Validated against {} (projects: {}).",
+                                r.base_url,
+                                r.project_count.unwrap_or(0)
+                            );
+                        } else {
+                            println!("Saved without validation (--no-verify).");
+                        }
+                        if let Some(w) = r.shadow_warning {
+                            println!("{w}");
+                        }
+                        println!("Next: ado-cli status --include-projects");
+                    }
+                    Ok(())
+                }
+                Err(e) => e.report(cli.json),
+            }
+        }
+        Command::Logout {} => match run_logout() {
+            Ok(r) => {
+                if cli.json {
+                    println!(
+                        "{}",
+                        serde_json::json!({"ok": true, "removed": r.removed, "shadow_warning": r.shadow_warning})
+                    );
+                } else {
+                    println!("Logged out (removed {}).", r.removed.display());
+                    if let Some(w) = r.shadow_warning {
+                        println!("{w}");
+                    }
+                }
+                Ok(())
+            }
+            Err(e) => e.report(cli.json),
+        },
+        _ => unreachable!("auth dispatch called for a non-auth command"),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
+
+    // `login`/`logout` must run before credential loading (first-run path).
+    if matches!(cli.command, Command::Login { .. } | Command::Logout {}) {
+        return dispatch_auth(cli).await;
+    }
 
     let config = Config::load_with_overrides(cli.token.as_deref(), cli.base_url.as_deref())?;
     let modules = create_modules(&config)?;
@@ -285,6 +419,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let queries = modules.queries;
 
     match cli.command {
+        // Auth commands are dispatched before credential loading (see the guard
+        // at the top of main): reaching them here means the guard was bypassed.
+        Command::Login { .. } | Command::Logout {} => {
+            unreachable!("auth commands are dispatched before credential loading")
+        }
         Command::Status {
             show_secrets,
             include_projects,

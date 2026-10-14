@@ -131,12 +131,10 @@ impl Config {
                 .join(CONFIG_FILENAME),
         )
     }
-
 }
 
 /// User-level config path: ~/.config/rusty_azure_devops/config.yaml
 /// (login always writes here — never next to the binary).
-#[allow(dead_code)] // Wired by Task 3 orchestration; remove the allow there.
 pub(crate) fn user_config_path() -> Option<std::path::PathBuf> {
     Config::config_path_home()
 }
@@ -150,7 +148,6 @@ pub(crate) fn binary_config_path() -> Option<std::path::PathBuf> {
 /// Write `cfg` as YAML to an explicit `path`, creating parent dirs. The file
 /// is created 0600 on Unix (PAT is a secret) and perms are re-asserted after
 /// the write so a pre-existing 0644 file is tightened too.
-#[allow(dead_code)] // Wired by Task 3 orchestration; remove the allow there.
 pub(crate) fn save_to(path: &std::path::Path, cfg: &YamlConfig) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -182,7 +179,6 @@ pub(crate) fn save_to(path: &std::path::Path, cfg: &YamlConfig) -> Result<(), St
 
 /// Serialize `cfg` to the user config path. Overwrites unconditionally —
 /// the caller (login) owns the --force guard.
-#[allow(dead_code)] // Wired by Task 3 orchestration; remove the allow there.
 pub(crate) fn save_user_config(cfg: &YamlConfig) -> Result<std::path::PathBuf, String> {
     let path = Config::config_path_home()
         .ok_or_else(|| "cannot resolve home directory for config save".to_string())?;

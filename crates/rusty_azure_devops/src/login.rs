@@ -9,9 +9,10 @@
 //! env or `--token-stdin` over `--token` (argv is visible in `ps` and history).
 
 use std::io::{self, IsTerminal, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::config::binary_config_path;
+use crate::config::{Config, YamlConfig, binary_config_path, save_user_config, user_config_path};
+use crate::{ListProjectsParams, create_modules};
 
 /// Classified, machine-readable failure for login/logout. `reason` is a stable
 /// token agents branch on (`missing_value`, `confirmation_required`,
@@ -87,7 +88,6 @@ pub fn required(raw: String, label: &str) -> Result<String, String> {
 /// Read the whole stdin as a PAT (for `--token-stdin`, the `gh --with-token`
 /// pattern). Refuses on a TTY (nothing piped) and on empty input — never falls
 /// through to a prompt: when stdin is a pipe there is no terminal to prompt on.
-#[allow(dead_code)] // Wired by Task 3 orchestration; remove the allow there.
 pub(crate) fn read_token_stdin() -> Result<String, String> {
     use std::io::Read;
     if io::stdin().is_terminal() {
@@ -103,7 +103,6 @@ pub(crate) fn read_token_stdin() -> Result<String, String> {
     required(buf, "token")
 }
 
-#[allow(dead_code)] // Wired by Task 3 orchestration; remove the allow there.
 pub(crate) fn prompt_line(label: &str) -> Result<String, String> {
     // Prompts go to stderr: stdout stays a clean pipe for payloads.
     eprint!("{label}: ");
@@ -117,7 +116,6 @@ pub(crate) fn prompt_line(label: &str) -> Result<String, String> {
     required(buf, label)
 }
 
-#[allow(dead_code)] // Wired by Task 3 orchestration; remove the allow there.
 pub(crate) fn prompt_password(label: &str) -> Result<String, String> {
     rpassword::prompt_password(format!("{label}: "))
         .map_err(|e| format!("cannot read token: {e}"))
@@ -139,9 +137,205 @@ pub fn shadow_note(config_path: &Path) -> Option<String> {
     }
 }
 
+/// Resolved input for one `login` run. Built from clap flags in `bin/cli.rs`;
+/// missing required values are prompted interactively (TTY only).
+#[derive(Debug, Clone, Default)]
+pub struct LoginParams {
+    pub base_url: Option<String>,
+    pub token: Option<String>,
+    /// Read the PAT from stdin instead of `--token` (keeps the PAT out of
+    /// shell history and `ps`). Conflicts with `token`.
+    pub token_stdin: bool,
+    pub organization: Option<String>,
+    pub project: Option<String>,
+    pub api_version: Option<String>,
+    pub ca_cert: Option<String>,
+    pub force: bool,
+    pub no_verify: bool,
+}
+
+/// Outcome of a successful login. Never contains the token (presence-only,
+/// per `status --show_secrets` precedent).
+#[derive(Debug, Clone)]
+pub struct LoginResult {
+    pub config_path: PathBuf,
+    pub base_url: String,
+    pub validated: bool,
+    pub project_count: Option<usize>,
+    pub shadow_warning: Option<String>,
+}
+
+/// Outcome of a successful logout.
+#[derive(Debug, Clone)]
+pub struct LogoutResult {
+    pub removed: PathBuf,
+    pub shadow_warning: Option<String>,
+}
+
+const URL_HINT: &str = "re-run with --base-url URL (or set ADO_BASE_URL)";
+const TOKEN_HINT: &str = "re-run with --token PAT, --token-stdin (pipe), or set ADO_TOKEN";
+const NON_TTY_HINT: &str = "no TTY for interactive prompts — pass flags, --token-stdin, or env";
+
+/// Run the full login flow: guard → resolve → validate → save.
+pub async fn run_login(params: LoginParams) -> Result<LoginResult, CommandError> {
+    // 1. Guard FIRST — before reading any secret from stdin, so a refused
+    //    overwrite never consumes credentials or prompts.
+    if let Some(path) = user_config_path()
+        && path.exists()
+        && !params.force
+    {
+        return Err(CommandError::new(
+            "confirmation_required",
+            format!(
+                "config already exists at {} — not overwritten",
+                path.display()
+            ),
+            "re-run with --force to overwrite the existing config".to_string(),
+        ));
+    }
+
+    // 2. Resolve: --token > --token-stdin > ADO_TOKEN > (TTY) prompt.
+    let stdin_token = if params.token_stdin {
+        Some(
+            read_token_stdin()
+                .map_err(|d| CommandError::new("missing_value", d, NON_TTY_HINT.to_string()))?,
+        )
+    } else {
+        None
+    };
+    let (url, token) = resolve_credentials(
+        params.base_url.clone(),
+        std::env::var("ADO_BASE_URL").ok(),
+        params.token.clone().or(stdin_token),
+        std::env::var("ADO_TOKEN").ok(),
+    );
+    let interactive = io::stdin().is_terminal();
+    let url = match url {
+        Some(u) if !u.trim().is_empty() => u.trim().to_string(),
+        _ if !interactive => {
+            return Err(CommandError::new(
+                "missing_value",
+                "base URL is required".to_string(),
+                URL_HINT.to_string(),
+            ));
+        }
+        _ => prompt_line(
+            "Azure DevOps base URL (e.g. https://tfs.example.com/tfs/DefaultCollection)",
+        )
+        .map_err(|d| CommandError::new("io_error", d, NON_TTY_HINT.to_string()))?,
+    };
+    let pat = match token {
+        Some(t) if !t.trim().is_empty() => t.trim().to_string(),
+        _ if !interactive => {
+            return Err(CommandError::new(
+                "missing_value",
+                "token is required".to_string(),
+                TOKEN_HINT.to_string(),
+            ));
+        }
+        _ => prompt_password("Personal Access Token (PAT, input hidden)")
+            .map_err(|d| CommandError::new("io_error", d, NON_TTY_HINT.to_string()))?,
+    };
+
+    // 3. Validate exactly what gets saved (no env leakage into validation).
+    let mut validated = false;
+    let mut project_count = None;
+    if !params.no_verify {
+        let cfg = Config {
+            ado_token: pat.clone(),
+            ado_base_url: Some(url.clone()),
+            ado_organization: params.organization.clone(),
+            ado_api_version: params.api_version.clone(),
+            ado_default_project: params.project.clone(),
+            ado_ca_cert: params.ca_cert.clone(),
+        };
+        let modules = create_modules(&cfg).map_err(|d| {
+            CommandError::new(
+                "validation_failed",
+                format!("cannot build client for {url}: {d}"),
+                "check the base URL, then re-run login".to_string(),
+            )
+        })?;
+        // `total` is the pre-pagination count (operations/project.rs);
+        // `projects.len()` would lie when limit < total.
+        let list = modules
+            .projects
+            .list_projects(ListProjectsParams {
+                offset: None,
+                limit: Some(1),
+            })
+            .await
+            .map_err(|e| {
+                CommandError::new(
+                    "validation_failed",
+                    format!("validation failed for {url}: {e} (not saved)"),
+                    "check the base URL and PAT, then re-run login (or add --no-verify to save without checking)".to_string(),
+                )
+            })?;
+        project_count = Some(list.total);
+        validated = true;
+    }
+
+    // 4. Save, then report a deployed config that would shadow it.
+    let yaml = YamlConfig {
+        ado_token: Some(pat),
+        ado_base_url: Some(url.clone()),
+        ado_organization: params.organization.clone(),
+        ado_api_version: params.api_version.clone(),
+        ado_default_project: params.project.clone(),
+        ado_ca_cert: params.ca_cert.clone(),
+    };
+    let config_path = save_user_config(&yaml).map_err(|d| {
+        CommandError::new(
+            "io_error",
+            d,
+            "check permissions on ~/.config/rusty_azure_devops".to_string(),
+        )
+    })?;
+    let shadow_warning = shadow_note(&config_path);
+    Ok(LoginResult {
+        config_path,
+        base_url: url,
+        validated,
+        project_count,
+        shadow_warning,
+    })
+}
+
+/// Delete the user config file, reporting any deployed config that still holds
+/// a credential (login's mirror image).
+pub fn run_logout() -> Result<LogoutResult, CommandError> {
+    let path = user_config_path().ok_or_else(|| {
+        CommandError::new(
+            "io_error",
+            "cannot resolve home directory".to_string(),
+            "set HOME and re-run logout".to_string(),
+        )
+    })?;
+    if !path.exists() {
+        return Err(CommandError::new(
+            "not_logged_in",
+            "not logged in (no config file found)".to_string(),
+            "run `ado-cli login` first".to_string(),
+        ));
+    }
+    std::fs::remove_file(&path).map_err(|d| {
+        CommandError::new(
+            "io_error",
+            format!("cannot remove {}: {d}", path.display()),
+            "check permissions on ~/.config/rusty_azure_devops".to_string(),
+        )
+    })?;
+    let shadow_warning = shadow_note(&path);
+    Ok(LogoutResult {
+        removed: path,
+        shadow_warning,
+    })
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::login::{CommandError, resolve_credentials, required};
+    use crate::login::{CommandError, required, resolve_credentials};
 
     #[test]
     fn resolve_credentials_prefers_flags_over_env() {
@@ -175,10 +369,14 @@ mod tests {
 
     #[test]
     fn command_error_exit_codes() {
-        let guard =
-            CommandError::new("confirmation_required", "d".to_string(), "h".to_string());
+        let guard = CommandError::new("confirmation_required", "d".to_string(), "h".to_string());
         assert_eq!(guard.exit_code, 3);
-        for reason in ["missing_value", "validation_failed", "not_logged_in", "io_error"] {
+        for reason in [
+            "missing_value",
+            "validation_failed",
+            "not_logged_in",
+            "io_error",
+        ] {
             let e = CommandError::new(reason, "d".to_string(), "h".to_string());
             assert_eq!(e.exit_code, 1, "reason {reason} must exit 1");
         }
