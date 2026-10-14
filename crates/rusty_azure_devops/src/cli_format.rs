@@ -192,9 +192,7 @@ pub fn empty_query_results_message(total: usize) -> String {
          Verify the query GUID/project and that the query returns rows in TFS."
             .to_string()
     } else {
-        format!(
-            "No work item IDs on this page (total: {total}). Lower --offset below {total}."
-        )
+        format!("No work item IDs on this page (total: {total}). Lower --offset below {total}.")
     }
 }
 

@@ -585,7 +585,10 @@ impl AzureDevOpsClient for AzureSdkClient {
                 }
             })
             .await?;
-        Ok(merge_query_result_ids(resp.work_items, resp.work_item_relations))
+        Ok(merge_query_result_ids(
+            resp.work_items,
+            resp.work_item_relations,
+        ))
     }
 
     async fn batch_get_work_items(
@@ -1006,8 +1009,14 @@ mod regression_tests {
     #[test]
     fn merge_query_ids_flat_only() {
         let items = vec![
-            wit::models::WorkItemReference { id: Some(1), url: None },
-            wit::models::WorkItemReference { id: Some(2), url: None },
+            wit::models::WorkItemReference {
+                id: Some(1),
+                url: None,
+            },
+            wit::models::WorkItemReference {
+                id: Some(2),
+                url: None,
+            },
         ];
         assert_eq!(merge_query_result_ids(items, vec![]), vec![1, 2]);
     }
@@ -1019,7 +1028,10 @@ mod regression_tests {
         let rel = |id: i32| wit::models::WorkItemLink {
             rel: None,
             source: None,
-            target: Some(wit::models::WorkItemReference { id: Some(id), url: None }),
+            target: Some(wit::models::WorkItemReference {
+                id: Some(id),
+                url: None,
+            }),
         };
         let relations = vec![rel(8243728), rel(10729324)];
         assert_eq!(
@@ -1030,11 +1042,20 @@ mod regression_tests {
 
     #[test]
     fn merge_query_ids_dedups_flat_source_target() {
-        let items = vec![wit::models::WorkItemReference { id: Some(7), url: None }];
+        let items = vec![wit::models::WorkItemReference {
+            id: Some(7),
+            url: None,
+        }];
         let relations = vec![wit::models::WorkItemLink {
             rel: Some("System.LinkTypes.Hierarchy-Forward".to_string()),
-            source: Some(wit::models::WorkItemReference { id: Some(7), url: None }),
-            target: Some(wit::models::WorkItemReference { id: Some(9), url: None }),
+            source: Some(wit::models::WorkItemReference {
+                id: Some(7),
+                url: None,
+            }),
+            target: Some(wit::models::WorkItemReference {
+                id: Some(9),
+                url: None,
+            }),
         }];
         assert_eq!(merge_query_result_ids(items, relations), vec![7, 9]);
     }

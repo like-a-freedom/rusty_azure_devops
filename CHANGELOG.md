@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-14
+
+### Added
+- `ado-cli login` / `ado-cli logout`: first-run authentication that saves the PAT and server URL to `~/.config/rusty_azure_devops/config.yaml` (mode 0600), validating credentials via `list_projects` before saving. Prompts only on a TTY; headless runs use `--base-url` with `--token`, `--token-stdin`, or `ADO_TOKEN` and otherwise fail fast.
+- Agent-friendly login contract: `--token-stdin` keeps the PAT out of argv and shell history; `--json` shapes both success and failure (errors go to stderr as `{"ok":false,"reason","detail","hint"}` with empty stdout); stable reason tokens; exit codes 0 ok / 2 usage / 3 needs `--force` / 1 other; success carries a `next` verify command.
+
+### Changed
+- Dependency upgrades to latest available versions: rmcp 3.5.1, jsonschema 0.58.6, schemars 1.2.3, thiserror 2.0.21, serde_json 1.0.154, tokio 1.53.3, reqwest 0.13.5, rand 0.10.3 (plus transitive lockfile updates; all tests green).
+- Toolchain pinned to `stable` via `rust-toolchain.toml` (MSRV policy tracks stable); removed the fixed component list.
+
+### Fixed
+- `ado-cli login` no longer panics on a malformed `--base-url`; it returns a `validation_failed` error envelope (exit 1) instead of crashing with exit 101.
+- Migrated to rmcp `ServerConfig` (the `ServerInfo` alias is deprecated).
+
 ## [0.3.0] - 2026-09-04
 
 ### Changed

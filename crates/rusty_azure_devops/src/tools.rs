@@ -262,12 +262,12 @@ use rmcp::tool_handler;
 
 #[tool_handler]
 impl rmcp::ServerHandler for AdoMcpHandler {
-    fn get_info(&self) -> rmcp::model::ServerInfo {
+    fn get_info(&self) -> rmcp::model::ServerConfig {
         let capabilities = rmcp::model::ServerCapabilities::builder()
             .enable_tools()
             .build();
 
-        rmcp::model::ServerInfo::new(capabilities).with_instructions(format!(
+        rmcp::model::ServerConfig::new(capabilities).with_instructions(format!(
             "Azure DevOps MCP server — manage work items, projects, queries, and comments. Tools: {}. Start with get_status to verify connectivity and find your default project.",
             Tool::all_names(),
         ))
