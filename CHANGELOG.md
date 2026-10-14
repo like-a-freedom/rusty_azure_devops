@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-10-14
+
+### Fixed
+- Release automation now actually runs: `.github` is no longer gitignored, so a release publishes the multi-platform binaries and the multi-arch Docker image.
+- Codecov upload no longer blocks the release build when no token is configured.
+
+### Changed
+- CI runs only on release (and manual dispatch) — no workflows on push or pull requests.
+- GitHub Actions updated to latest: actions/checkout v7, actions/cache v6, actions-rust-lang/setup-rust-toolchain v2, codecov/codecov-action v7, docker/* v4/v7, softprops/action-gh-release v3.
+- Dependabot version-update pull requests disabled (`open-pull-requests-limit: 0`).
+
 ## [0.4.0] - 2026-10-14
 
 ### Added
