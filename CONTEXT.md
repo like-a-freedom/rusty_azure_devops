@@ -40,6 +40,21 @@ _Avoid_: "add vs replace inconsistency", "patch operation" (use op)
 A saved/shared work item query in Azure DevOps, identified by a GUID (e.g., `1c3ed7b3-17bb-4fe9-9b64-256f118ebebf`) and reachable through a URL like `.../Project/_queries/query/GUID`. Executed via `get_query_results` to return matching work item IDs.
 _Avoid_: search, WIQL query (that's `search_work_items`)
 
+## Configuration
+
+**Login**:
+The CLI-only first-run authentication flow (`ado-cli login`): resolve credentials
+(flags > stdin > env > TTY prompt) → validate via `list_projects` → save the user config.
+No MCP tool (ADR-0016); failures are a `CommandError` with a stable `reason` token, a
+copy-pasteable `hint`, and an exit code (3 = confirmation_required).
+_Avoid_: auth command, setup wizard, signin
+
+**UserConfig**:
+The user-level `~/.config/rusty_azure_devops/config.yaml` written by `login` (mode 0600,
+`logout` deletes it). A `config.yaml` next to the binary takes precedence on load and can
+shadow it — both commands report that via `shadow_warning`.
+_Avoid_: global config, settings.json
+
 ## Test doubles
 
 **InMemoryAzureClient**:

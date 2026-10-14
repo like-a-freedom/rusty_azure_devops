@@ -1,4 +1,6 @@
 # Azure DevOps MCP/CLI configuration
+# Preferred: run `ado-cli login` instead of editing this file by hand.
+# This example remains for Docker/MCP deployments and CI (env vars).
 # Copy this to config.yaml next to the binary and fill in real values.
 # Priority: CLI flags > environment variables > config.yaml > defaults
 

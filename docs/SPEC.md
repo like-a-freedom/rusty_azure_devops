@@ -49,6 +49,8 @@
 
 Примечание: конфигурация может быть изменена только путём обновления переменных окружения и перезапуска сервиса.
 
+Update 2026-10: primary human/agent path is ado-cli login (see FR-8); the ENV-only statement above applies to the MCP server runtime.
+
 ---
 
 ## 4. Функциональные требования (FR) ✅
@@ -101,6 +103,20 @@ FR-6: StdIO / rmcp Contract
 FR-7: Ошибки и retry
 - Транзитивные ошибки (timeouts/5xx) — retry с экспоненциальным бэкоффом (макс 3 попытки).
 - Клиентские ошибки (4xx) — не ретраить; возвращать структурированную ошибку с кодом и сообщением.
+
+FR-8: Первичная авторизация (login)
+- Описание: CLI-команда `ado-cli login` сохраняет PAT и URL сервера в пользовательский
+  конфиг `~/.config/rusty_azure_devops/config.yaml` с правами 0600. Значения берутся из
+  флагов (`--base-url`, `--token`, `--token-stdin`), затем env (`ADO_BASE_URL`, `ADO_TOKEN`),
+  затем интерактивных запросов (только при TTY, ввод PAT скрыт). Перед сохранением
+  выполняется проверка через `list_projects` (отключается `--no-verify`).
+- Реализация: `ado-cli login [--base-url --token|--token-stdin --organization --project
+  --api-version --ca-cert --force --no-verify --json]`, `ado-cli logout [--json]`.
+- Приёмка: без TTY и без флагов/env команда завершается быстро с `missing_value`
+  (код 1), а не блокируется на вводе; перезапись существующего конфига требует
+  `--force` (иначе `confirmation_required`, код 3); при `--json` ошибки возвращаются
+  в stderr как `{"ok":false,"reason","detail","hint"}`, stdout остаётся пустым; токен
+  не выводится ни в одном режиме.
 
 ---
 

@@ -45,13 +45,33 @@ Both call the same operations — `WorkItemOperations` and `ProjectLookup` are t
 
 ## Configuration
 
+### First run (recommended)
+
+```sh
+ado-cli login
+# prompts for base URL + PAT (hidden input), validates, saves to
+# ~/.config/rusty_azure_devops/config.yaml (mode 0600).
+ado-cli status --include-projects
+```
+
+### For AI agents (non-interactive)
+
+```sh
+echo "$ADO_TOKEN" | ado-cli login --base-url URL --token-stdin --force --json
+# secret hygiene: prefer ADO_TOKEN env or --token-stdin (argv leaks via ps/history).
+# exit codes: 0 ok, 2 usage, 3 needs --force, 1 other; errors are JSON on stderr
+# with stable `reason` (missing_value, confirmation_required, validation_failed,
+# not_logged_in, io_error) and a copy-pasteable `hint`. stdout stays empty on failure.
+ado-cli status --include-projects --json
+```
+
 ### Priority chain
 
 Settings resolve in this order (highest wins):
 
 1. **CLI flags** (`--token`, `--base-url`)
 2. **Environment variables**
-3. **`config.yaml`** (next to the binary, or `~/.config/rusty_azure_devops/config.yaml`)
+3. **`config.yaml`** (written by `ado-cli login`; next to the binary, or `~/.config/rusty_azure_devops/config.yaml`)
 4. **Defaults** (none for required fields — server exits with error)
 
 ### Config reference
@@ -95,7 +115,7 @@ The certificate is added to the system trust store at startup via `SSL_CERT_FILE
 The binary looks for `config.yaml` in two locations (first found wins):
 
 1. **Next to the binary** — in the same directory as `ado-mcp` / `ado-cli`
-2. **`~/.config/rusty_azure_devops/config.yaml`** — user-level config (XDG-style)
+2. **`~/.config/rusty_azure_devops/config.yaml`** — user-level config (XDG-style, written by `ado-cli login` — do not hand-edit secrets)
 
 **Cloud (Azure DevOps Services):**
 
