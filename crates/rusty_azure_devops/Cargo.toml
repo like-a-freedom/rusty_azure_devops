@@ -36,6 +36,7 @@ azure_devops_client = { path = "../azure_devops_client" }
 tokio = { version = "1.53.1", features = ["sync", "rt-multi-thread", "macros"] }
 htmd = "0.5.5"
 pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+rpassword = "7"
 clap = { version = "4", features = ["derive"] }
 serde_yaml = "0.9"
 url = "2.5.8"

@@ -2,6 +2,7 @@ pub mod bootstrap;
 pub mod cli_format;
 pub mod config;
 pub mod domain;
+pub mod login;
 pub mod operations;
 pub mod tools;
 
