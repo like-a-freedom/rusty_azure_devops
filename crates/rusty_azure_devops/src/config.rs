@@ -1,15 +1,22 @@
 use std::env;
+use std::io::Write;
 
 const CONFIG_FILENAME: &str = "config.yaml";
 
-#[derive(Debug, Clone, serde::Deserialize, Default)]
-struct YamlConfig {
-    ado_token: Option<String>,
-    ado_base_url: Option<String>,
-    ado_organization: Option<String>,
-    ado_api_version: Option<String>,
-    ado_default_project: Option<String>,
-    ado_ca_cert: Option<String>,
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize, Default)]
+pub(crate) struct YamlConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) ado_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) ado_base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) ado_organization: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) ado_api_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) ado_default_project: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) ado_ca_cert: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +131,60 @@ impl Config {
                 .join(CONFIG_FILENAME),
         )
     }
+
+}
+
+/// User-level config path: ~/.config/rusty_azure_devops/config.yaml
+/// (login always writes here — never next to the binary).
+pub(crate) fn user_config_path() -> Option<std::path::PathBuf> {
+    Config::config_path_home()
+}
+
+/// Binary-dir config path (next to the executable). Exposed read-only so
+/// login/logout can report that a deployed config shadows the user file.
+pub(crate) fn binary_config_path() -> Option<std::path::PathBuf> {
+    Config::config_path()
+}
+
+/// Write `cfg` as YAML to an explicit `path`, creating parent dirs. The file
+/// is created 0600 on Unix (PAT is a secret) and perms are re-asserted after
+/// the write so a pre-existing 0644 file is tightened too.
+pub(crate) fn save_to(path: &std::path::Path, cfg: &YamlConfig) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create config dir {}: {}", parent.display(), e))?;
+    }
+    let content =
+        serde_yaml::to_string(cfg).map_err(|e| format!("cannot serialize config: {}", e))?;
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Mode at creation: never leave a 0644 window on disk.
+        opts.mode(0o600);
+    }
+    let mut f = opts
+        .open(path)
+        .map_err(|e| format!("cannot write {}: {}", path.display(), e))?;
+    f.write_all(content.as_bytes())
+        .map_err(|e| format!("cannot write {}: {}", path.display(), e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("cannot chmod 0600 {}: {}", path.display(), e))?;
+    }
+    Ok(())
+}
+
+/// Serialize `cfg` to the user config path. Overwrites unconditionally —
+/// the caller (login) owns the --force guard.
+pub(crate) fn save_user_config(cfg: &YamlConfig) -> Result<std::path::PathBuf, String> {
+    let path = Config::config_path_home()
+        .ok_or_else(|| "cannot resolve home directory for config save".to_string())?;
+    save_to(&path, cfg)?;
+    Ok(path)
 }
 
 #[cfg(test)]
@@ -159,5 +220,81 @@ mod tests {
         let c = result.unwrap();
         assert_eq!(c.ado_token, "tok");
         assert_eq!(c.ado_base_url.as_deref(), Some("https://x.com"));
+    }
+
+    #[test]
+    fn save_to_roundtrip_with_owner_only_perms() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "ado-cfg-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.yaml");
+        let cfg = crate::config::YamlConfig {
+            ado_token: Some("pat123".into()),
+            ado_base_url: Some("https://tfs.example.com/tfs/DefaultCollection".into()),
+            ado_organization: None,
+            ado_api_version: Some("6.0".into()),
+            ado_default_project: Some("Demo".into()),
+            ado_ca_cert: None,
+        };
+        crate::config::save_to(&path, &cfg).expect("save works");
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("ado_base_url"));
+        assert!(content.contains("pat123"));
+        // Absent optionals are omitted, not written as `null` (skip_serializing_if).
+        assert!(!content.contains("null"));
+        // Roundtrip: what we wrote parses back through the real loader path.
+        let parsed: crate::config::YamlConfig = serde_yaml::from_str(&content).unwrap();
+        assert_eq!(
+            parsed.ado_base_url.as_deref(),
+            Some("https://tfs.example.com/tfs/DefaultCollection")
+        );
+        assert!(parsed.ado_organization.is_none());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "PAT file must be owner-only");
+        }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn save_to_reasserts_perms_on_preexisting_loose_file() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static N: AtomicU64 = AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "ado-cfg-loose-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.yaml");
+        std::fs::write(&path, "ado_token: old\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        }
+        let cfg = crate::config::YamlConfig {
+            ado_token: Some("new-pat".into()),
+            ado_base_url: Some("https://tfs.example.com".into()),
+            ado_organization: None,
+            ado_api_version: None,
+            ado_default_project: None,
+            ado_ca_cert: None,
+        };
+        crate::config::save_to(&path, &cfg).expect("save over existing");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "pre-existing 0644 file must be tightened");
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
