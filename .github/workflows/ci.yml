@@ -9,10 +9,6 @@ on:
         description: Enable debug mode
         required: false
         default: false
-  pull_request:
-    branches: [main, master]
-  push:
-    branches: [main, master]
 
 jobs:
   checks:
