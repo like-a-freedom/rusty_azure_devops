@@ -19,7 +19,7 @@ jobs:
     name: Checks (fmt, clippy, tests)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Cache cargo registry
         uses: actions/cache@v5
@@ -95,7 +95,7 @@ jobs:
             target: x86_64-pc-windows-msvc
             bin: rusty_azure_devops_windows_x86_64.exe
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Cache cargo registry
         uses: actions/cache@v5
@@ -168,7 +168,7 @@ jobs:
       packages: write
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3.7.0
