@@ -39,7 +39,8 @@ pub fn create_modules(config: &Config) -> Result<Modules, String> {
     if let Some(ref v) = config.ado_api_version {
         builder = builder.api_version(v);
     }
-    let client = Arc::new(builder.build()) as Arc<dyn azure_devops_client::AzureDevOpsClient>;
+    let client = Arc::new(builder.build().map_err(|error| error.to_string())?)
+        as Arc<dyn azure_devops_client::AzureDevOpsClient>;
 
     let service_config = ServiceConfig {
         base_url: Some(base),
@@ -86,6 +87,20 @@ mod tests {
         let _: QueryOperations = modules.queries;
         let _: LinkOperations = modules.links;
         let _: CommentOperations = modules.comments;
+    }
+
+    #[test]
+    fn create_modules_rejects_remote_http_endpoint() {
+        let config = Config {
+            ado_token: "synthetic-token".into(),
+            ado_base_url: Some("http://tfs.example.invalid/tfs/DefaultCollection".into()),
+            ado_organization: None,
+            ado_api_version: None,
+            ado_default_project: None,
+            ado_ca_cert: None,
+        };
+
+        assert!(create_modules(&config).is_err());
     }
 
     #[test]

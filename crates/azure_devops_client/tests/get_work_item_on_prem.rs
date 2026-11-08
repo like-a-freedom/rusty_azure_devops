@@ -22,7 +22,9 @@ async fn get_work_item_on_prem() {
 
     // Create client with an endpoint that includes trailing slash and collection segment
     let endpoint = format!("{}/tfs/DefaultCollection/", server.uri());
-    let client = AzureSdkClient::builder(endpoint, "token", "org").build();
+    let client = AzureSdkClient::builder(endpoint, "token", "org")
+        .build()
+        .expect("loopback HTTP mock endpoint");
 
     // Perform get_work_item which should hit the server
     let wi = client

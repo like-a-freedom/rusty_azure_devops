@@ -15,7 +15,9 @@ async fn retry_respects_retry_after_and_sleeps() {
         .mount(&server)
         .await;
 
-    let client = AzureSdkClient::builder(server.uri(), "token", "org").build();
+    let client = AzureSdkClient::builder(server.uri(), "token", "org")
+        .build()
+        .expect("loopback HTTP mock endpoint");
     let start = std::time::Instant::now();
     let res = client.list_projects().await;
     let elapsed = start.elapsed();
@@ -34,7 +36,9 @@ async fn wiql_retry_and_succeeds() {
         .mount(&server)
         .await;
 
-    let client = AzureSdkClient::builder(server.uri(), "token", "org").build();
+    let client = AzureSdkClient::builder(server.uri(), "token", "org")
+        .build()
+        .expect("loopback HTTP mock endpoint");
     let start = std::time::Instant::now();
     let res = client.query_wiql("proj", "select *", 10).await;
     let elapsed = start.elapsed();
@@ -51,7 +55,9 @@ async fn retry_gives_up_on_server_error() {
         .mount(&server)
         .await;
 
-    let client = AzureSdkClient::builder(server.uri(), "token", "org").build();
+    let client = AzureSdkClient::builder(server.uri(), "token", "org")
+        .build()
+        .expect("loopback HTTP mock endpoint");
     let res = client.list_projects().await;
     assert!(res.is_err());
 }

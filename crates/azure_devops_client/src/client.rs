@@ -98,6 +98,12 @@ pub struct AzureSdkClientBuilder {
 }
 
 impl AzureSdkClientBuilder {
+    /// Validate an Azure DevOps endpoint without constructing a client.
+    /// HTTPS is required except for loopback HTTP endpoints used by local services.
+    pub fn validate_endpoint(endpoint: &str) -> Result<(), AzureError> {
+        crate::resilience::parse_secure_endpoint(endpoint).map(|_| ())
+    }
+
     pub fn project(mut self, project: impl Into<String>) -> Self {
         self.project = Some(project.into());
         self
@@ -118,11 +124,12 @@ impl AzureSdkClientBuilder {
         self
     }
 
-    pub fn build(self) -> AzureSdkClient {
+    /// Build an `AzureSdkClient` after validating the endpoint transport.
+    pub fn build(self) -> Result<AzureSdkClient, AzureError> {
         let endpoint_s = self.endpoint.trim_end_matches('/').to_string();
         let pat_s = self.pat.clone();
         let cred = Credential::from_pat(pat_s.clone());
-        let endpoint_url = url::Url::parse(&endpoint_s).expect("invalid endpoint url");
+        let endpoint_url = crate::resilience::parse_secure_endpoint(&endpoint_s)?;
         let path = endpoint_url.path().to_lowercase();
         let base_contains_collection =
             path.contains("/tfs/") || path.contains("/defaultcollection");
@@ -158,19 +165,17 @@ impl AzureSdkClientBuilder {
         let retry: Arc<dyn RetryStrategy> = self
             .retry
             .unwrap_or_else(|| Arc::new(crate::ProductionRetry::from_env()));
-        let fallback: Option<Arc<dyn OnPremFallback>> = self.fallback.or_else(|| {
-            if base_contains_collection {
-                Some(Arc::new(crate::ProductionFallback::new(
-                    endpoint_s,
-                    pat_s,
-                    api_versions,
-                )))
-            } else {
-                None
-            }
-        });
+        let fallback: Option<Arc<dyn OnPremFallback>> = match self.fallback {
+            Some(fallback) => Some(fallback),
+            None if base_contains_collection => Some(Arc::new(crate::ProductionFallback::new(
+                endpoint_s,
+                pat_s,
+                api_versions,
+            )?)),
+            None => None,
+        };
 
-        AzureSdkClient {
+        Ok(AzureSdkClient {
             wit_client,
             core_client,
             org: self.org,
@@ -178,7 +183,7 @@ impl AzureSdkClientBuilder {
             base_contains_collection,
             retry,
             fallback,
-        }
+        })
     }
 }
 
@@ -782,7 +787,9 @@ mod tests {
 
     #[test]
     fn effective_project_returns_default_empty() {
-        let c = AzureSdkClient::builder("https://tfs.example.com", "fake", "").build();
+        let c = AzureSdkClient::builder("https://tfs.example.com", "fake", "")
+            .build()
+            .expect("valid HTTPS endpoint");
         assert_eq!(c.effective_project(), "");
     }
 
@@ -790,7 +797,8 @@ mod tests {
     fn effective_project_returns_stored_project() {
         let c = AzureSdkClient::builder("https://tfs.example.com", "fake", "")
             .project("MyProject")
-            .build();
+            .build()
+            .expect("valid HTTPS endpoint");
         assert_eq!(c.effective_project(), "MyProject");
     }
 
@@ -846,16 +854,30 @@ mod tests {
     }
 
     #[test]
+    fn production_fallback_rejects_remote_http_endpoint() {
+        let result = crate::ProductionFallback::new(
+            "http://tfs.example.invalid/tfs/DefaultCollection",
+            "synthetic-fallback-pat",
+            vec!["6.0".into()],
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn new_detects_base_collection_in_url() {
         let c =
             AzureSdkClient::builder("https://tfs.example.com/tfs/DefaultCollection", "fake", "")
-                .build();
+                .build()
+                .expect("valid HTTPS endpoint");
         assert!(c.base_contains_collection);
     }
 
     #[test]
     fn new_detects_no_collection_in_url() {
-        let c = AzureSdkClient::builder("https://dev.azure.com/org", "fake", "org").build();
+        let c = AzureSdkClient::builder("https://dev.azure.com/org", "fake", "org")
+            .build()
+            .expect("valid HTTPS endpoint");
         assert!(!c.base_contains_collection);
     }
 
@@ -863,7 +885,8 @@ mod tests {
     fn new_trims_trailing_slash() {
         let c =
             AzureSdkClient::builder("https://tfs.example.com/tfs/DefaultCollection/", "fake", "")
-                .build();
+                .build()
+                .expect("valid HTTPS endpoint");
         assert!(c.base_contains_collection);
     }
 
@@ -871,7 +894,8 @@ mod tests {
     fn new_with_custom_api_version() {
         let c = AzureSdkClient::builder("https://tfs.example.com", "fake", "")
             .api_version("7.0")
-            .build();
+            .build()
+            .expect("valid HTTPS endpoint");
         assert_eq!(c.retry.retry_policy().max_retries, 3);
     }
 
@@ -882,14 +906,17 @@ mod tests {
             "fake",
             "org",
         )
-        .build();
+        .build()
+        .expect("valid HTTPS endpoint");
         assert!(c.base_contains_collection);
         assert_eq!(c.effective_org(), "");
     }
 
     #[test]
     fn effective_org_is_org_for_cloud_url() {
-        let c = AzureSdkClient::builder("https://dev.azure.com/yourorg", "fake", "org").build();
+        let c = AzureSdkClient::builder("https://dev.azure.com/yourorg", "fake", "org")
+            .build()
+            .expect("valid HTTPS endpoint");
         assert!(!c.base_contains_collection);
         assert_eq!(c.effective_org(), "org");
     }
@@ -923,7 +950,8 @@ mod regression_tests {
 
         let client = AzureSdkClient::builder(endpoint, "fake-pat", "")
             .api_version("6.0")
-            .build();
+            .build()
+            .expect("loopback HTTP mock endpoint");
         let result = client
             .get_work_item(9579673, Some(&["System.Id", "System.Tags"]), None)
             .await;
@@ -949,7 +977,8 @@ mod regression_tests {
 
         let client = AzureSdkClient::builder(endpoint, "fake-pat", "")
             .api_version("6.0")
-            .build();
+            .build()
+            .expect("loopback HTTP mock endpoint");
         let result = client.get_work_item(42, None, None).await;
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
     }
@@ -973,7 +1002,8 @@ mod regression_tests {
 
         let client = AzureSdkClient::builder(endpoint, "fake-pat", "")
             .api_version("6.0")
-            .build();
+            .build()
+            .expect("loopback HTTP mock endpoint");
         let result = client.list_projects().await;
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
         let projects = result.unwrap();
@@ -998,7 +1028,9 @@ mod regression_tests {
             .mount(&mock)
             .await;
 
-        let client = AzureSdkClient::builder(endpoint, "fake-pat", "").build();
+        let client = AzureSdkClient::builder(endpoint, "fake-pat", "")
+            .build()
+            .expect("loopback HTTP mock endpoint");
         let result = client.list_projects().await;
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
         let projects = result.unwrap();
@@ -1089,7 +1121,8 @@ mod regression_tests {
 
         let client = AzureSdkClient::builder(endpoint, "fake-pat", "")
             .api_version("6.0")
-            .build();
+            .build()
+            .expect("loopback HTTP mock endpoint");
         let result = client.query_by_id("Corp-SecurityCenter", "q1").await;
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
         assert_eq!(result.unwrap(), vec![8243728, 10729324]);

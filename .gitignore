@@ -7,6 +7,7 @@
 # Local tooling and agent runtime
 /.vscode/
 !/.vscode/mcp.json.example
+.delta/
 /.scratch/
 /.commandcode/
 /.superpowers/

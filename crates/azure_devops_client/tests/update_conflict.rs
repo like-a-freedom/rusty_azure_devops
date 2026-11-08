@@ -14,7 +14,9 @@ async fn update_conflict_returns_error() {
         .mount(&server)
         .await;
 
-    let client = AzureSdkClient::builder(server.uri(), "token", "org").build();
+    let client = AzureSdkClient::builder(server.uri(), "token", "org")
+        .build()
+        .expect("loopback HTTP mock endpoint");
     let patch = serde_json::json!([{ "op":"add", "path":"/fields/System.Title", "value":"x" }]);
     let res = client.update_work_item(42, &patch, Some(1)).await;
     assert!(res.is_err());

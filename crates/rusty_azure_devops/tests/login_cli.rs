@@ -270,6 +270,32 @@ fn saved_file_is_owner_only_on_unix() {
 }
 
 #[test]
+fn login_no_verify_rejects_remote_http_without_saving_config() {
+    let home = unique_home("http");
+    let mut cmd = login_cmd(&home);
+    cmd.args([
+        "login",
+        "--base-url",
+        "http://tfs.example.invalid/tfs/DefaultCollection",
+        "--token",
+        "synthetic-pat",
+        "--no-verify",
+        "--json",
+    ]);
+    let out = cmd.assert().code(1).get_output().clone();
+    let error: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(error["reason"], "validation_failed");
+    assert!(error["detail"].as_str().unwrap().contains("HTTPS"));
+    assert!(out.stdout.is_empty());
+    assert!(!String::from_utf8_lossy(&out.stderr).contains("synthetic-pat"));
+    assert!(
+        !user_config(&home).exists(),
+        "an insecure endpoint must not be saved"
+    );
+    std::fs::remove_dir_all(&home).ok();
+}
+
+#[test]
 fn malformed_base_url_is_rejected_before_any_network() {
     let home = unique_home("badurl");
     let mut cmd = login_cmd(&home);

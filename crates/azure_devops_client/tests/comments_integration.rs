@@ -24,7 +24,9 @@ async fn create_work_item_and_add_comment_flow() {
         .mount(&server)
         .await;
 
-    let client = AzureSdkClient::builder(server.uri(), "token", "org").build();
+    let client = AzureSdkClient::builder(server.uri(), "token", "org")
+        .build()
+        .expect("loopback HTTP mock endpoint");
     let patch = serde_json::json!([
         { "op": "add", "path": "/fields/System.Title", "value": "test" }
     ]);
@@ -69,7 +71,9 @@ async fn add_comment_fallback_to_history() {
         .mount(&server)
         .await;
 
-    let client = AzureSdkClient::builder(server.uri(), "token", "org").build();
+    let client = AzureSdkClient::builder(server.uri(), "token", "org")
+        .build()
+        .expect("loopback HTTP mock endpoint");
     let comment = azure_devops_client::Comment {
         id: None,
         author: None,

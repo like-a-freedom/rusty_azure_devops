@@ -12,6 +12,8 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use crate::config::{Config, YamlConfig, binary_config_path, save_user_config, user_config_path};
+use azure_devops_client::AzureSdkClientBuilder;
+
 use crate::{ListProjectsParams, create_modules};
 
 /// Classified, machine-readable failure for login/logout. `reason` is a stable
@@ -243,11 +245,11 @@ pub async fn run_login(params: LoginParams) -> Result<LoginResult, CommandError>
     // Shape-check the URL up front (not a network call, so it applies even
     // with --no-verify): a malformed URL would otherwise panic inside the
     // client builder (exit 101, no envelope).
-    url::Url::parse(&url).map_err(|e| {
+    AzureSdkClientBuilder::validate_endpoint(&url).map_err(|error| {
         CommandError::new(
             "validation_failed",
-            format!("invalid base URL {url:?}: {e} (not saved)"),
-            "pass a full URL, e.g. https://tfs.example.com/tfs/DefaultCollection".to_string(),
+            format!("{error} (not saved)"),
+            "use an HTTPS base URL, e.g. https://tfs.example.com/tfs/DefaultCollection".to_string(),
         )
     })?;
 

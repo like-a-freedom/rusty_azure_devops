@@ -116,9 +116,29 @@ impl RetryStrategy for ProductionRetry {
     }
 }
 
+pub(crate) fn parse_secure_endpoint(endpoint: &str) -> Result<url::Url, AzureError> {
+    let endpoint_url = url::Url::parse(endpoint)
+        .map_err(|_| AzureError::Config("invalid Azure DevOps endpoint URL".to_string()))?;
+    let is_loopback_http = endpoint_url.scheme() == "http"
+        && match endpoint_url.host() {
+            Some(url::Host::Ipv4(address)) => address.is_loopback(),
+            Some(url::Host::Ipv6(address)) => address.is_loopback(),
+            Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+            None => false,
+        };
+
+    if endpoint_url.scheme() != "https" && !is_loopback_http {
+        return Err(AzureError::Config(
+            "Azure DevOps endpoint must use HTTPS; HTTP is allowed only for loopback endpoints"
+                .to_string(),
+        ));
+    }
+
+    Ok(endpoint_url)
+}
+
 /// Production on-prem fallback: direct HTTP GET that bypasses the SDK.
-/// Holds the on-prem context (endpoint, PAT, API versions) needed to
-/// build direct HTTP requests.
+/// Holds a validated endpoint, PAT, and API versions needed to build requests.
 pub struct ProductionFallback {
     endpoint: String,
     pat: String,
@@ -126,16 +146,19 @@ pub struct ProductionFallback {
 }
 
 impl ProductionFallback {
+    /// Create a fallback only for HTTPS or loopback HTTP endpoints.
     pub fn new(
         endpoint: impl Into<String>,
         pat: impl Into<String>,
         api_versions: Vec<String>,
-    ) -> Self {
-        Self {
-            endpoint: endpoint.into(),
+    ) -> Result<Self, AzureError> {
+        let endpoint = endpoint.into();
+        parse_secure_endpoint(&endpoint)?;
+        Ok(Self {
+            endpoint,
             pat: pat.into(),
             api_versions,
-        }
+        })
     }
 
     /// Build the URL for an on-prem fallback request, joining endpoint, path,
@@ -178,27 +201,21 @@ impl OnPremFallback for ProductionFallback {
                         .send()
                         .await;
                     match resp_res {
-                        Err(e) => {
-                            errors.push(format!("{} {} -> request error: {}", api, auth_val, e));
+                        Err(_) => {
+                            errors.push(format!("{api} -> request failed"));
                             continue;
                         }
                         Ok(resp) => {
                             let status = resp.status();
                             let body_text = resp.text().await.unwrap_or_default();
                             if !status.is_success() {
-                                errors.push(format!(
-                                    "{} {} -> {}: {}",
-                                    api, auth_val, status, body_text
-                                ));
+                                errors.push(format!("{api} -> HTTP {status}"));
                                 continue;
                             }
                             match serde_json::from_str::<serde_json::Value>(&body_text) {
                                 Ok(v) => return Ok(v),
-                                Err(e) => {
-                                    errors.push(format!(
-                                        "{} {} -> decode failed: {} | body: {}",
-                                        api, auth_val, e, body_text
-                                    ));
+                                Err(_) => {
+                                    errors.push(format!("{api} -> invalid JSON response"));
                                     continue;
                                 }
                             }
@@ -240,24 +257,21 @@ impl OnPremFallback for ProductionFallback {
                     .send()
                     .await;
                 match resp_res {
-                    Err(e) => {
-                        errors.push(format!("{} -> request error: {}", auth_val, e));
+                    Err(_) => {
+                        errors.push(format!("{api_version} -> request failed"));
                         continue;
                     }
                     Ok(resp) => {
                         let status = resp.status();
                         let body_text = resp.text().await.unwrap_or_default();
                         if !status.is_success() {
-                            errors.push(format!("{} -> {}: {}", auth_val, status, body_text));
+                            errors.push(format!("{api_version} -> HTTP {status}"));
                             continue;
                         }
                         match serde_json::from_str::<serde_json::Value>(&body_text) {
                             Ok(v) => return Ok(v),
-                            Err(e) => {
-                                errors.push(format!(
-                                    "{} -> decode failed: {} | body: {}",
-                                    auth_val, e, body_text
-                                ));
+                            Err(_) => {
+                                errors.push(format!("{api_version} -> invalid JSON response"));
                                 continue;
                             }
                         }
@@ -305,6 +319,8 @@ mod tests {
     use super::*;
     use std::sync::Arc;
     use std::sync::atomic::{AtomicU32, Ordering};
+    use wiremock::matchers::method;
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn retry_succeeds_after_retries() {
@@ -456,6 +472,62 @@ mod tests {
         let strategy: &dyn RetryStrategy = &p;
         let policy = strategy.retry_policy();
         assert_eq!(policy.max_retries, 2);
+    }
+
+    #[tokio::test]
+    async fn fallback_get_error_does_not_expose_pat_or_response_body() {
+        let mock = MockServer::start().await;
+        let pat = "synthetic-pat-for-regression-test";
+        let response_body = "synthetic-fallback-response-body";
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(401).set_body_string(response_body))
+            .mount(&mock)
+            .await;
+
+        let fallback = ProductionFallback::new(mock.uri(), pat, vec!["6.0".into()])
+            .expect("loopback HTTP mock endpoint");
+        let error = fallback
+            .get("_apis/projects")
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            !error.contains(pat),
+            "fallback error exposed the configured PAT"
+        );
+        assert!(
+            !error.contains(response_body),
+            "fallback error echoed server response data"
+        );
+    }
+
+    #[tokio::test]
+    async fn fallback_get_with_api_version_error_does_not_expose_pat_or_response_body() {
+        let mock = MockServer::start().await;
+        let pat = "synthetic-pat-for-regression-test";
+        let response_body = "synthetic-fallback-response-body";
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(401).set_body_string(response_body))
+            .mount(&mock)
+            .await;
+
+        let fallback =
+            ProductionFallback::new(mock.uri(), pat, vec![]).expect("loopback HTTP mock endpoint");
+        let error = fallback
+            .get_with_api_version("_apis/wit/workitems/42/comments", "6.0-preview")
+            .await
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            !error.contains(pat),
+            "fallback error exposed the configured PAT"
+        );
+        assert!(
+            !error.contains(response_body),
+            "fallback error echoed server response data"
+        );
     }
 
     #[test]
