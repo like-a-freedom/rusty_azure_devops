@@ -1,5 +1,9 @@
 name: Build and Release
 
+# Least-privilege default; jobs that need more grant it explicitly.
+permissions:
+  contents: read
+
 on:
   release:
     types: [created]
@@ -67,9 +71,9 @@ jobs:
     if: github.event_name == 'release'
     needs: checks
     runs-on: ${{ matrix.platform.os }}
+    # Uploads release assets only; image publication lives in build_docker_images.
     permissions:
       contents: write
-      packages: write
     strategy:
       fail-fast: false
       matrix:

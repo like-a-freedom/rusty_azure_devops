@@ -1,5 +1,21 @@
 use crate::domain::*;
 
+/// Escape ASCII control characters so ADO-sourced text cannot inject
+/// terminal escape sequences into human-readable CLI output.
+/// Newlines and tabs are kept; every other control byte becomes a visible
+/// `\u{XX}` escape.
+pub(crate) fn escape_terminal(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '\n' | '\t' => out.push(ch),
+            c if c.is_control() => out.push_str(&format!("\\u{{{:X}}}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 pub fn parse_work_item_id(s: &str) -> WorkItemId {
     s.parse::<i64>()
         .map(WorkItemId::Int)
@@ -21,22 +37,26 @@ pub fn format_status(result: &StatusResult, json: bool) {
     println!("Status: {}", result.status);
     println!("Projects: {}", result.project_count);
     if let Some(ref proj) = result.default_project {
-        println!("Default project: {}", proj);
+        println!("Default project: {}", escape_terminal(proj));
     }
     if !result.projects.is_empty() {
         println!("Projects list:");
         for p in &result.projects {
-            println!("  - {} ({})", p.name, p.id);
+            println!(
+                "  - {} ({})",
+                escape_terminal(&p.name),
+                escape_terminal(&p.id)
+            );
         }
     }
     if let Some(ref cfg) = result.config {
         println!("Config:");
         println!("  token_present: {}", cfg.token_present);
         if let Some(ref url) = cfg.ado_base_url {
-            println!("  base_url: {}", url);
+            println!("  base_url: {}", escape_terminal(url));
         }
         if let Some(ref proj) = cfg.ado_default_project {
-            println!("  default_project: {}", proj);
+            println!("  default_project: {}", escape_terminal(proj));
         }
     }
 }
@@ -48,7 +68,11 @@ pub fn format_list_projects(result: &ListProjectsResult, json: bool) {
     }
     println!("Total: {}", result.total);
     for p in &result.projects {
-        println!("  {} ({})", p.name, p.id);
+        println!(
+            "  {} ({})",
+            escape_terminal(&p.name),
+            escape_terminal(&p.id)
+        );
     }
 }
 
@@ -62,14 +86,18 @@ pub fn format_work_item(result: &GetWorkItemResult, json: bool) {
         println!("  Rev: {}", rev);
     }
     if let Some(ref title) = result.fields.title {
-        println!("  Title: {}", title);
+        println!("  Title: {}", escape_terminal(title));
     }
     if let Some(ref desc) = result.fields.description {
-        println!("  Description: {}", desc);
+        println!("  Description: {}", escape_terminal(desc));
     }
     if let Some(ref extra) = result.fields.extra {
         for (k, v) in extra {
-            println!("  {}: {}", k, v);
+            println!(
+                "  {}: {}",
+                escape_terminal(k),
+                escape_terminal(&v.to_string())
+            );
         }
     }
     if let Some(ref relations) = result.relations
@@ -77,7 +105,12 @@ pub fn format_work_item(result: &GetWorkItemResult, json: bool) {
     {
         println!("  Relations:");
         for r in relations {
-            println!("    {} -> {} ({})", r.rel, r.url, r.rel);
+            println!(
+                "    {} -> {} ({})",
+                escape_terminal(&r.rel),
+                escape_terminal(&r.url),
+                escape_terminal(&r.rel)
+            );
         }
     }
     if let Some(ref comments) = result.comments
@@ -87,9 +120,9 @@ pub fn format_work_item(result: &GetWorkItemResult, json: bool) {
         for c in comments {
             println!(
                 "    [{}] {}: {}",
-                c.created_at.as_deref().unwrap_or("?"),
-                c.author.as_deref().unwrap_or("?"),
-                c.text
+                escape_terminal(c.created_at.as_deref().unwrap_or("?")),
+                escape_terminal(c.author.as_deref().unwrap_or("?")),
+                escape_terminal(&c.text)
             );
         }
     }
@@ -101,9 +134,9 @@ pub fn format_create_result(result: &CreateWorkItemResult, json: bool) {
         return;
     }
     println!("Created work item #{}", result.id);
-    println!("URL: {}", result.url);
+    println!("URL: {}", escape_terminal(&result.url));
     if let Some(ref title) = result.fields.title {
-        println!("Title: {}", title);
+        println!("Title: {}", escape_terminal(title));
     }
 }
 
@@ -115,12 +148,16 @@ pub fn format_link_result(result: &ManageWorkItemLinkResult, json: bool) {
     if result.success {
         println!("Success");
     } else if let Some(ref msg) = result.message {
-        println!("Failed: {}", msg);
+        println!("Failed: {}", escape_terminal(msg));
     }
     if let Some(ref relations) = result.relations {
         println!("Relations:");
         for r in relations {
-            println!("  {} -> {}", r.rel, r.url);
+            println!(
+                "  {} -> {}",
+                escape_terminal(&r.rel),
+                escape_terminal(&r.url)
+            );
         }
     }
 }
@@ -138,7 +175,7 @@ pub fn format_search(result: &SearchWorkItemsResult, json: bool) {
         for wi in details {
             print!("  #{}", wi.id);
             if let Some(ref title) = wi.fields.title {
-                print!(" - {}", title);
+                print!(" - {}", escape_terminal(title));
             }
             println!();
         }
@@ -161,9 +198,9 @@ pub fn format_comments(result: &GetWorkitemCommentsResult, json: bool) {
     for c in &result.comments {
         println!(
             "  [{}] {}:\n    {}",
-            c.created_at.as_deref().unwrap_or("?"),
-            c.author.as_deref().unwrap_or("anonymous"),
-            c.text
+            escape_terminal(c.created_at.as_deref().unwrap_or("?")),
+            escape_terminal(c.author.as_deref().unwrap_or("anonymous")),
+            escape_terminal(&c.text)
         );
     }
 }
@@ -524,5 +561,36 @@ mod tests {
         let msg = empty_query_results_message(312);
         assert!(msg.contains("312"), "unexpected message: {msg}");
         assert!(msg.contains("--offset"), "unexpected message: {msg}");
+    }
+
+    #[test]
+    fn escape_terminal_keeps_plain_text_unchanged() {
+        assert_eq!(escape_terminal("hello, world #42"), "hello, world #42");
+    }
+
+    #[test]
+    fn escape_terminal_keeps_newlines_and_tabs() {
+        assert_eq!(escape_terminal("a\nb\tc"), "a\nb\tc");
+    }
+
+    #[test]
+    fn escape_terminal_neutralizes_escape_sequences() {
+        let hostile = format!("title {}red\u{7}bell", "\u{1b}[31m");
+        let escaped = escape_terminal(&hostile);
+        assert!(
+            !escaped.contains('\u{1b}') && !escaped.contains('\u{7}'),
+            "control bytes must not survive: {escaped:?}"
+        );
+        assert!(
+            escaped.contains("title") && escaped.contains("red") && escaped.contains("bell"),
+            "visible text must be preserved: {escaped:?}"
+        );
+    }
+
+    #[test]
+    fn escape_terminal_neutralizes_carriage_returns_and_del() {
+        let escaped = escape_terminal("a\rb\u{7f}c");
+        assert!(!escaped.contains('\r') && !escaped.contains('\u{7f}'));
+        assert!(escaped.contains('a') && escaped.contains('b') && escaped.contains('c'));
     }
 }

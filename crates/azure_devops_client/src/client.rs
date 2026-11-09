@@ -37,6 +37,7 @@ impl AzureSdkClient {
             api_version: None,
             retry: None,
             fallback: None,
+            ca_cert: None,
         }
     }
 
@@ -95,6 +96,7 @@ pub struct AzureSdkClientBuilder {
     api_version: Option<String>,
     retry: Option<Arc<dyn RetryStrategy>>,
     fallback: Option<Arc<dyn OnPremFallback>>,
+    ca_cert: Option<String>,
 }
 
 impl AzureSdkClientBuilder {
@@ -111,6 +113,12 @@ impl AzureSdkClientBuilder {
 
     pub fn api_version(mut self, api_version: impl Into<String>) -> Self {
         self.api_version = Some(api_version.into());
+        self
+    }
+
+    /// Add a custom root CA certificate from a PEM or DER file.
+    pub fn ca_cert(mut self, path: impl Into<String>) -> Self {
+        self.ca_cert = Some(path.into());
         self
     }
 
@@ -150,28 +158,46 @@ impl AzureSdkClientBuilder {
             } else {
                 vec![]
             };
+        let custom_http_client = self
+            .ca_cert
+            .as_deref()
+            .map(build_ca_http_client)
+            .transpose()?;
 
-        let wit_client = wit::Client::builder(cred.clone())
+        let mut wit_builder = wit::Client::builder(cred.clone())
             .endpoint(endpoint_url.clone())
             .scopes(&["vso.work"])
-            .per_try_policies(downgrade_policy.clone())
-            .build();
-        let core_client = azure_devops_rust_api::core::Client::builder(cred)
+            .per_try_policies(downgrade_policy.clone());
+        if let Some(http_client) = custom_http_client.as_ref() {
+            wit_builder = wit_builder.transport(azure_core::http::Transport::new(Arc::new(
+                http_client.clone(),
+            )));
+        }
+        let wit_client = wit_builder.build();
+
+        let mut core_builder = azure_devops_rust_api::core::Client::builder(cred)
             .endpoint(endpoint_url)
             .scopes(&["vso.core"])
-            .per_try_policies(downgrade_policy)
-            .build();
+            .per_try_policies(downgrade_policy);
+        if let Some(http_client) = custom_http_client.as_ref() {
+            core_builder = core_builder.transport(azure_core::http::Transport::new(Arc::new(
+                http_client.clone(),
+            )));
+        }
+        let core_client = core_builder.build();
 
         let retry: Arc<dyn RetryStrategy> = self
             .retry
             .unwrap_or_else(|| Arc::new(crate::ProductionRetry::from_env()));
         let fallback: Option<Arc<dyn OnPremFallback>> = match self.fallback {
             Some(fallback) => Some(fallback),
-            None if base_contains_collection => Some(Arc::new(crate::ProductionFallback::new(
-                endpoint_s,
-                pat_s,
-                api_versions,
-            )?)),
+            None if base_contains_collection => {
+                let mut fallback = crate::ProductionFallback::new(endpoint_s, pat_s, api_versions)?;
+                if let Some(http_client) = custom_http_client {
+                    fallback = fallback.with_http_client(http_client);
+                }
+                Some(Arc::new(fallback))
+            }
             None => None,
         };
 
@@ -185,6 +211,31 @@ impl AzureSdkClientBuilder {
             fallback,
         })
     }
+}
+
+fn build_ca_http_client(path: &str) -> Result<reqwest::Client, AzureError> {
+    let certificate_bytes = std::fs::read(path)
+        .map_err(|_| AzureError::Config("cannot read custom CA certificate".to_string()))?;
+    let certificate = reqwest::Certificate::from_pem(&certificate_bytes)
+        .or_else(|_| reqwest::Certificate::from_der(&certificate_bytes))
+        .map_err(|_| AzureError::Config("invalid custom CA certificate".to_string()))?;
+    reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(20))
+        .read_timeout(std::time::Duration::from_secs(60))
+        .redirect(reqwest::redirect::Policy::none())
+        .add_root_certificate(certificate)
+        .build()
+        .map_err(|_| {
+            AzureError::Config("cannot build HTTP client with custom CA certificate".to_string())
+        })
+}
+
+fn work_item_id_to_sdk_id(id: i64) -> Result<i32, AzureError> {
+    i32::try_from(id).map_err(|_| {
+        AzureError::Http(HttpError::decode(
+            "work item ID is outside the supported 32-bit range",
+        ))
+    })
 }
 
 /// Classify an `azure_core::Error` into `AzureError::Http(HttpError)`. When the
@@ -324,7 +375,7 @@ impl AzureDevOpsClient for AzureSdkClient {
     ) -> Result<WorkItem, AzureError> {
         let org = self.effective_org();
         let project = self.effective_project();
-        let id32 = id as i32;
+        let id32 = work_item_id_to_sdk_id(id)?;
         let fields_csv = fields.map(|f| f.join(","));
         let expand_val = expand.map(|s| s.to_string());
 
@@ -465,13 +516,26 @@ impl AzureDevOpsClient for AzureSdkClient {
         &self,
         id: i64,
         patch: &serde_json::Value,
-        _expected_rev: Option<u64>,
+        expected_rev: Option<u64>,
     ) -> Result<WorkItem, AzureError> {
-        let ops: Vec<wit::models::JsonPatchOperation> = serde_json::from_value(patch.clone())
+        let mut patch = patch.clone();
+        if let Some(expected_rev) = expected_rev
+            && let Some(operations) = patch.as_array_mut()
+        {
+            operations.insert(
+                0,
+                serde_json::json!({
+                    "op": "test",
+                    "path": "/rev",
+                    "value": expected_rev
+                }),
+            );
+        }
+        let ops: Vec<wit::models::JsonPatchOperation> = serde_json::from_value(patch)
             .map_err(|e| AzureError::Http(HttpError::decode(format!("invalid patch: {}", e))))?;
         let org = self.effective_org();
         let project = self.effective_project();
-        let id32 = id as i32;
+        let id32 = work_item_id_to_sdk_id(id)?;
         let resp = self
             .retry
             .retry_policy()
@@ -606,7 +670,10 @@ impl AzureDevOpsClient for AzureSdkClient {
         }
         let org = self.effective_org();
         let project = self.effective_project();
-        let ids_i32: Vec<i32> = ids.iter().map(|&id| id as i32).collect();
+        let ids_i32: Vec<i32> = ids
+            .iter()
+            .map(|&id| work_item_id_to_sdk_id(id))
+            .collect::<std::result::Result<_, _>>()?;
         let fields_owned: Option<Vec<String>> =
             fields.map(|f| f.iter().map(|s| s.to_string()).collect());
         let resp = self
@@ -645,6 +712,7 @@ impl AzureDevOpsClient for AzureSdkClient {
     }
 
     async fn get_comments(&self, work_item_id: i64) -> Result<Vec<Comment>, AzureError> {
+        work_item_id_to_sdk_id(work_item_id)?;
         if self.base_contains_collection {
             self.get_comments_on_prem(work_item_id).await
         } else {
@@ -661,7 +729,7 @@ impl AzureDevOpsClient for AzureSdkClient {
         cc.text = Some(comment.text.clone());
         let org = self.effective_org();
         let project = self.effective_project();
-        let id32 = work_item_id as i32;
+        let id32 = work_item_id_to_sdk_id(work_item_id)?;
         let resp_res: Result<wit::models::Comment, AzureError> = self
             .retry
             .retry_policy()
@@ -752,7 +820,7 @@ impl AzureSdkClient {
     async fn get_comments_sdk(&self, work_item_id: i64) -> Result<Vec<Comment>, AzureError> {
         let org = self.effective_org();
         let project = self.effective_project();
-        let id32 = work_item_id as i32;
+        let id32 = work_item_id_to_sdk_id(work_item_id)?;
         let creq = self
             .retry
             .retry_policy()
@@ -854,6 +922,15 @@ mod tests {
     }
 
     #[test]
+    fn validate_endpoint_rejects_embedded_credentials() {
+        let result = AzureSdkClientBuilder::validate_endpoint(
+            "https://user:synthetic-password@tfs.example.invalid/tfs/DefaultCollection",
+        );
+
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn production_fallback_rejects_remote_http_endpoint() {
         let result = crate::ProductionFallback::new(
             "http://tfs.example.invalid/tfs/DefaultCollection",
@@ -927,8 +1004,60 @@ mod tests {
 mod regression_tests {
     use super::*;
     use crate::AzureDevOpsClient;
-    use wiremock::matchers::{method, path, path_regex, query_param};
+    use wiremock::matchers::{body_json, method, path, path_regex, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn update_work_item_sends_expected_revision_test() {
+        let mock = MockServer::start().await;
+        let expected_patch = serde_json::json!([
+            {"op": "test", "path": "/rev", "value": 7},
+            {"op": "replace", "path": "/fields/System.Title", "value": "updated"}
+        ]);
+        Mock::given(method("PATCH"))
+            .and(body_json(expected_patch))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id": 42,
+                "rev": 8,
+                "fields": {"System.Title": "updated"},
+                "url": format!("{}/_apis/wit/workItems/42", mock.uri())
+            })))
+            .expect(1)
+            .mount(&mock)
+            .await;
+
+        let client = AzureSdkClient::builder(mock.uri(), "fake-pat", "org")
+            .build()
+            .expect("loopback HTTP mock endpoint");
+        let patch = serde_json::json!([
+            {"op": "replace", "path": "/fields/System.Title", "value": "updated"}
+        ]);
+        let result = client.update_work_item(42, &patch, Some(7)).await;
+
+        assert!(
+            result.is_ok(),
+            "expected update to match request contract: {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_work_item_rejects_id_outside_sdk_range() {
+        let mock = MockServer::start().await;
+        let client = AzureSdkClient::builder(mock.uri(), "fake-pat", "org")
+            .build()
+            .expect("loopback HTTP mock endpoint");
+
+        for id in [i64::from(i32::MAX) + 1, i64::from(i32::MIN) - 1] {
+            let error = client
+                .get_work_item(id, None, None)
+                .await
+                .expect_err("out-of-range work item IDs must be rejected before the request");
+            assert!(
+                matches!(error, AzureError::Http(HttpError::Decode(_))),
+                "expected an ID validation error, got {error:?}"
+            );
+        }
+    }
 
     #[tokio::test]
     async fn get_work_item_on_prem_with_fields_constructs_valid_url() {

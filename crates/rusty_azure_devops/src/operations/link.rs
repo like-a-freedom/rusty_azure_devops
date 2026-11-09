@@ -111,10 +111,11 @@ impl LinkOperations {
                 let target_id_opt = p.target.to_i64().ok();
                 let mut found_idx: Option<usize> = None;
                 for (i, r) in relations.iter().enumerate() {
-                    if r.url == target_str
-                        || target_id_opt
-                            .map(|id| r.url.ends_with(&format!("/{}", id)))
-                            .unwrap_or(false)
+                    if r.rel.as_deref() == Some(link_type.as_str())
+                        && (r.url == target_str
+                            || target_id_opt
+                                .map(|id| r.url.ends_with(&format!("/{}", id)))
+                                .unwrap_or(false))
                     {
                         found_idx = Some(i);
                         break;
@@ -212,6 +213,51 @@ mod tests {
             .await
             .unwrap();
         assert!(res.success);
+    }
+
+    #[tokio::test]
+    async fn link_ops_remove_keeps_hyperlink_with_same_numeric_suffix() {
+        use azure_devops_client::InMemoryAzureClient;
+        let client = InMemoryAzureClient::default();
+        {
+            let mut work_items = client.work_items.lock().unwrap();
+            work_items.insert(
+                100,
+                azure_devops_client::WorkItem {
+                    id: 100,
+                    rev: Some(1),
+                    fields: serde_json::json!({"System.Title": "src"}),
+                    comments: None,
+                    relations: Some(vec![
+                        azure_devops_client::Relation {
+                            rel: Some("Hyperlink".to_string()),
+                            url: "https://docs.example.invalid/references/101".to_string(),
+                            attributes: None,
+                        },
+                        azure_devops_client::Relation {
+                            rel: Some("System.LinkTypes.Related".to_string()),
+                            url: "https://example.invalid/workItems/101".to_string(),
+                            attributes: None,
+                        },
+                    ]),
+                },
+            );
+        }
+        let svc = LinkOperations::new(Arc::new(client));
+        let result = svc
+            .manage_work_item_link(ManageWorkItemLinkParams {
+                action: "remove".into(),
+                source_id: WorkItemId::Int(100),
+                target: WorkItemId::Int(101),
+                link_type: Some("System.LinkTypes.Related".into()),
+                attributes: None,
+            })
+            .await
+            .unwrap();
+
+        let remaining = result.relations.expect("relations are returned");
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].rel, "Hyperlink");
     }
 
     #[tokio::test]

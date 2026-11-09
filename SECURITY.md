@@ -27,7 +27,10 @@ You can expect an acknowledgement within 72 hours and a fix or mitigation plan w
 This project handles Azure DevOps Personal Access Tokens (PATs) for API authentication. Security-sensitive areas include:
 
 - **Credential handling** — PAT storage, transmission, and logging. The server refuses to start without `ADO_TOKEN` set.
-- **On-prem TLS** — Custom CA certificate support via `ADO_CA_CERT` / `SSL_CERT_FILE` for self-signed corporate servers.
+- **Config file trust** — `config.yaml` (next to the executable or in `~/.config/rusty_azure_devops/`) is refused when group- or world-writable; newly created config directories get mode `0700`, and existing config files are tightened to `0600` through the open handle before new secret bytes are written.
+- **Endpoint validation** — HTTPS is required (loopback HTTP allowed); URLs with embedded username/password are rejected before the server starts.
+- **On-prem TLS** — Per-client custom CA certificate support via `ADO_CA_CERT`; process-wide TLS environment settings are not modified.
+- **Terminal output escaping** — human-readable CLI output escapes control characters (e.g. `ESC`, `BEL`, `CR`) in server-sourced text so fetched Work Item or comment content cannot inject terminal escape sequences; JSON output is structured.
 - **URL handling** — `manage_work_item_link` rejects suspicious target URLs (e.g. web "edit" pages) to prevent unintended navigation patterns.
 - **Input validation** — JSON Patch documents and tool parameters are validated against `docs/schemas/*.schema.json`.
 

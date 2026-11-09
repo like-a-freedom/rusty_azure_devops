@@ -26,13 +26,14 @@ pub fn create_modules(config: &Config) -> Result<Modules, String> {
         .ok_or_else(|| "ADO_BASE_URL required".to_string())?;
     let token = config.ado_token.clone();
 
-    config.apply_ca_cert();
-
     let mut builder = AzureSdkClient::builder(
         base.clone(),
         token,
         config.ado_organization.clone().unwrap_or_default(),
     );
+    if let Some(ref ca_cert) = config.ado_ca_cert {
+        builder = builder.ca_cert(ca_cert);
+    }
     if let Some(ref p) = config.ado_default_project {
         builder = builder.project(p);
     }

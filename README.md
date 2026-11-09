@@ -108,7 +108,7 @@ Or add it to `config.yaml`:
 ado_ca_cert: "/path/to/corporate-root-ca.cer"
 ```
 
-The certificate is added to the system trust store at startup via `SSL_CERT_FILE`, so both the Azure SDK and direct HTTP clients use it. Supports `.pem`, `.crt`, `.cer`, and `.der` formats.
+The certificate is loaded into the Azure SDK and on-prem fallback HTTP clients for this process. The application does not modify the process-wide `SSL_CERT_FILE` environment variable. PEM and DER certificate files are supported.
 
 ### YAML config file
 

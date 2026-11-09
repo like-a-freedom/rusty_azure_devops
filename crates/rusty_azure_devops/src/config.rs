@@ -38,7 +38,11 @@ impl Config {
         token_override: Option<&str>,
         base_url_override: Option<&str>,
     ) -> Result<Self, String> {
-        let yaml = Self::load_yaml().unwrap_or_default();
+        let yaml = Self::load_yaml_from_paths(
+            Self::config_path().as_deref(),
+            Self::config_path_home().as_deref(),
+        )?
+        .unwrap_or_default();
 
         let token = if let Some(t) = token_override {
             t.to_string()
@@ -83,35 +87,47 @@ impl Config {
         })
     }
 
-    /// Apply CA certificate settings. Call before creating HTTP clients.
-    /// The Azure SDK reads `SSL_CERT_FILE` from the environment — no API exists to inject
-    /// a custom CA directly into the SDK's HTTP client.
-    pub fn apply_ca_cert(&self) {
-        if let Some(ref cert_path) = self.ado_ca_cert
-            && std::env::var("SSL_CERT_FILE").is_err()
-        {
-            // SAFETY: called before threads are spawned (both callers invoke this
-            // immediately after Config::load and before AzureSdkClient::new).
-            // The SDK has no API to inject a custom CA into its HTTP client.
-            #[allow(unused_unsafe)]
-            unsafe {
-                std::env::set_var("SSL_CERT_FILE", cert_path)
-            };
+    fn load_yaml_from_paths(
+        binary_path: Option<&std::path::Path>,
+        home_path: Option<&std::path::Path>,
+    ) -> Result<Option<YamlConfig>, String> {
+        for path in [binary_path, home_path].into_iter().flatten() {
+            if let Some(cfg) = Self::load_yaml_file(path)? {
+                return Ok(Some(cfg));
+            }
         }
+        Ok(None)
     }
 
-    fn load_yaml() -> Option<YamlConfig> {
-        // Try binary-dir config first, then ~/.config/rusty_azure_devops/config.yaml
-        if let Some(path) = Self::config_path()
-            && let Ok(content) = std::fs::read_to_string(&path)
-            && let Ok(yaml) = serde_yaml::from_str(&content)
-        {
-            return Some(yaml);
+    fn load_yaml_file(path: &std::path::Path) -> Result<Option<YamlConfig>, String> {
+        Self::reject_insecure_config_file(path)?;
+        let Ok(content) = std::fs::read_to_string(path) else {
+            return Ok(None);
+        };
+        Ok(serde_yaml::from_str(&content).ok())
+    }
+
+    /// Refuse to load a config file that any group member or other user can
+    /// write: such a file can silently redirect the PAT to a hostile endpoint.
+    #[cfg(unix)]
+    fn reject_insecure_config_file(path: &std::path::Path) -> Result<(), String> {
+        use std::os::unix::fs::PermissionsExt;
+        let Ok(metadata) = std::fs::metadata(path) else {
+            return Ok(()); // absent file: caller's read step handles it
+        };
+        if metadata.permissions().mode() & 0o022 != 0 {
+            return Err(format!(
+                "refusing to read config {}: file is group/world-writable; \
+                 set tighter permissions (e.g. chmod 600) or move it to a private directory",
+                path.display()
+            ));
         }
-        Self::config_path_home().and_then(|path| {
-            let content = std::fs::read_to_string(&path).ok()?;
-            serde_yaml::from_str(&content).ok()
-        })
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    fn reject_insecure_config_file(_path: &std::path::Path) -> Result<(), String> {
+        Ok(())
     }
 
     fn config_path() -> Option<std::path::PathBuf> {
@@ -145,18 +161,51 @@ pub(crate) fn binary_config_path() -> Option<std::path::PathBuf> {
     Config::config_path()
 }
 
-/// Write `cfg` as YAML to an explicit `path`, creating parent dirs. The file
-/// is created 0600 on Unix (PAT is a secret) and perms are re-asserted after
-/// the write so a pre-existing 0644 file is tightened too.
+/// Create the config parent directory chain owner-only (0700) so a PAT can
+/// never be published into a group-readable tree. Existing directories are
+/// left untouched — their ACLs belong to whoever created them.
+#[cfg(unix)]
+fn create_config_dir(parent: &std::path::Path) -> std::io::Result<()> {
+    use std::io::ErrorKind;
+    use std::os::unix::fs::DirBuilderExt;
+    // Collect the missing ancestors below the deepest existing one, then
+    // create each with mode 0700 (DirBuilder::recursive would apply the mode
+    // only to the leaf).
+    let mut uncreated = Vec::new();
+    let mut cursor = parent;
+    while !cursor.exists() {
+        uncreated.push(cursor.to_path_buf());
+        match cursor.parent() {
+            Some(p) => cursor = p,
+            None => break,
+        }
+    }
+    for dir in uncreated.iter().rev() {
+        if let Err(e) = std::fs::DirBuilder::new().mode(0o700).create(dir)
+            && (e.kind() != ErrorKind::AlreadyExists || !dir.is_dir())
+        {
+            return Err(e);
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn create_config_dir(parent: &std::path::Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(parent)
+}
+
+/// Write `cfg` as YAML to an explicit `path`, creating parent dirs. On Unix,
+/// tighten an existing file to 0600 before truncating or writing its contents.
 pub(crate) fn save_to(path: &std::path::Path, cfg: &YamlConfig) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
+        create_config_dir(parent)
             .map_err(|e| format!("cannot create config dir {}: {}", parent.display(), e))?;
     }
     let content =
         serde_yaml::to_string(cfg).map_err(|e| format!("cannot serialize config: {}", e))?;
     let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
+    opts.write(true).create(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -165,15 +214,17 @@ pub(crate) fn save_to(path: &std::path::Path, cfg: &YamlConfig) -> Result<(), St
     }
     let mut f = opts
         .open(path)
-        .map_err(|e| format!("cannot write {}: {}", path.display(), e))?;
-    f.write_all(content.as_bytes())
-        .map_err(|e| format!("cannot write {}: {}", path.display(), e))?;
+        .map_err(|e| format!("cannot open config {}: {}", path.display(), e))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        f.set_permissions(std::fs::Permissions::from_mode(0o600))
             .map_err(|e| format!("cannot chmod 0600 {}: {}", path.display(), e))?;
     }
+    f.set_len(0)
+        .map_err(|e| format!("cannot truncate config {}: {}", path.display(), e))?;
+    f.write_all(content.as_bytes())
+        .map_err(|e| format!("cannot write {}: {}", path.display(), e))?;
     Ok(())
 }
 
@@ -200,16 +251,45 @@ mod tests {
     }
 
     #[test]
-    fn config_apply_ca_cert_no_cert_is_noop() {
-        let c = Config {
-            ado_token: "x".into(),
-            ado_base_url: None,
-            ado_organization: None,
-            ado_api_version: None,
-            ado_default_project: None,
-            ado_ca_cert: None,
-        };
-        c.apply_ca_cert();
+    fn create_modules_applies_custom_ca_without_mutating_ssl_cert_file() {
+        if std::env::var_os("ADO_CA_CERT_PROBE").is_some() {
+            let dir = std::env::temp_dir().join(format!("ado-ca-probe-{}", std::process::id()));
+            std::fs::create_dir_all(&dir).unwrap();
+            let ca_path = dir.join("synthetic-ca.pem");
+            std::fs::write(&ca_path, include_str!("../tests/fixtures/synthetic-ca.pem")).unwrap();
+            let config = Config {
+                ado_token: "synthetic-token".into(),
+                ado_base_url: Some("https://tfs.example.invalid/tfs/DefaultCollection".into()),
+                ado_organization: None,
+                ado_api_version: None,
+                ado_default_project: None,
+                ado_ca_cert: Some(ca_path.to_string_lossy().into_owned()),
+            };
+            let result = crate::create_modules(&config);
+            let ssl_cert_file_is_unset = std::env::var_os("SSL_CERT_FILE").is_none();
+            std::fs::remove_dir_all(&dir).ok();
+            assert!(
+                ssl_cert_file_is_unset,
+                "custom CA configuration must not mutate the process environment"
+            );
+            assert!(result.is_ok(), "custom CA should configure the HTTP client");
+            return;
+        }
+
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg("config::tests::create_modules_applies_custom_ca_without_mutating_ssl_cert_file")
+            .arg("--test-threads=1")
+            .env("ADO_CA_CERT_PROBE", "1")
+            .env_remove("SSL_CERT_FILE")
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "isolated CA configuration child failed (stdout: {}; stderr: {})",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
     }
 
     #[test]
@@ -294,6 +374,207 @@ mod tests {
             let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
             assert_eq!(mode, 0o600, "pre-existing 0644 file must be tightened");
         }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    fn write_loose_yaml(dir: &std::path::Path, name: &str, token: &str) -> std::path::PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join(name);
+        std::fs::write(&path, format!("ado_token: {token}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap();
+        path
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_yaml_rejects_group_or_world_writable_binary_config() {
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        use std::sync::atomic::Ordering;
+        let dir = std::env::temp_dir().join(format!(
+            "ado-cfg-untrusted-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let binary_cfg = write_loose_yaml(&dir, "config.yaml", "attacker-endpoint-token");
+
+        let result = Config::load_yaml_from_paths(Some(&binary_cfg), None);
+        assert!(
+            matches!(&result, Err(msg) if msg.contains("writable")),
+            "group/world-writable config must be rejected with an explanatory error: {result:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_yaml_rejects_world_writable_home_config() {
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        use std::sync::atomic::Ordering;
+        let dir = std::env::temp_dir().join(format!(
+            "ado-cfg-home-untrusted-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let home_cfg = write_loose_yaml(&dir, "home.yaml", "loose-token");
+
+        let result = Config::load_yaml_from_paths(None, Some(&home_cfg));
+        assert!(
+            matches!(&result, Err(msg) if msg.contains("writable")),
+            "world-writable home config must be rejected: {result:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn load_yaml_accepts_owner_only_binary_config() {
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::atomic::Ordering;
+        let dir = std::env::temp_dir().join(format!(
+            "ado-cfg-trusted-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let binary_cfg = dir.join("config.yaml");
+        std::fs::write(&binary_cfg, "ado_token: private-token\n").unwrap();
+        std::fs::set_permissions(&binary_cfg, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        let result = Config::load_yaml_from_paths(Some(&binary_cfg), None)
+            .expect("owner-only config must load");
+        assert_eq!(result.unwrap().ado_token.as_deref(), Some("private-token"));
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_to_creates_missing_parent_dirs_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        use std::sync::atomic::Ordering;
+        let dir = std::env::temp_dir().join(format!(
+            "ado-cfg-newdir-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
+        let parent = dir.join(".config").join("rusty_azure_devops");
+        let path = parent.join("config.yaml");
+        let cfg = YamlConfig {
+            ado_token: Some("secret".into()),
+            ado_base_url: Some("https://tfs.example.invalid".into()),
+            ado_organization: None,
+            ado_api_version: None,
+            ado_default_project: None,
+            ado_ca_cert: None,
+        };
+        save_to(&path, &cfg).expect("save with missing parents");
+        let mode = std::fs::metadata(&parent).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "created config dir must be owner-only");
+        let top_mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(top_mode, 0o700, "every created dir must be owner-only");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_to_leaves_existing_parent_dir_mode_untouched() {
+        use std::os::unix::fs::PermissionsExt;
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        use std::sync::atomic::Ordering;
+        let dir = std::env::temp_dir().join(format!(
+            "ado-cfg-existdir-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = dir.join("config.yaml");
+        let cfg = YamlConfig {
+            ado_token: Some("secret".into()),
+            ado_base_url: Some("https://tfs.example.invalid".into()),
+            ado_organization: None,
+            ado_api_version: None,
+            ado_default_project: None,
+            ado_ca_cert: None,
+        };
+        save_to(&path, &cfg).expect("save into existing dir");
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o755, "caller-owned existing dirs keep their mode");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_to_restricts_loose_file_before_publishing_new_token() {
+        use std::io::Read;
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::{
+            Arc, Barrier,
+            atomic::{AtomicBool, Ordering},
+        };
+        use std::thread;
+
+        static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "ado-cfg-window-{}-{}",
+            std::process::id(),
+            N.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.yaml");
+        std::fs::write(&path, "existing non-secret config\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let marker = "synthetic-window-token";
+        let cfg = YamlConfig {
+            ado_token: Some(format!("{marker}{}", "x".repeat(32 * 1024 * 1024))),
+            ado_base_url: Some("https://tfs.example.invalid".into()),
+            ado_organization: None,
+            ado_api_version: None,
+            ado_default_project: None,
+            ado_ca_cert: None,
+        };
+        let writing = Arc::new(AtomicBool::new(true));
+        let observed = Arc::new(AtomicBool::new(false));
+        let barrier = Arc::new(Barrier::new(2));
+        let reader_path = path.clone();
+        let reader_writing = Arc::clone(&writing);
+        let reader_observed = Arc::clone(&observed);
+        let reader_barrier = Arc::clone(&barrier);
+        let reader = thread::spawn(move || {
+            reader_barrier.wait();
+            while reader_writing.load(Ordering::Acquire) {
+                if let Ok(mut file) = std::fs::File::open(&reader_path)
+                    && let Ok(metadata) = file.metadata()
+                    && metadata.permissions().mode() & 0o077 != 0
+                {
+                    let mut prefix = [0; 128];
+                    if let Ok(read) = file.read(&mut prefix)
+                        && prefix[..read]
+                            .windows(marker.len())
+                            .any(|window| window == marker.as_bytes())
+                    {
+                        reader_observed.store(true, Ordering::Release);
+                        break;
+                    }
+                }
+            }
+        });
+
+        barrier.wait();
+        let save_result = save_to(&path, &cfg);
+        writing.store(false, Ordering::Release);
+        reader.join().unwrap();
+        save_result.unwrap();
+
+        assert!(
+            !observed.load(Ordering::Acquire),
+            "new token bytes became readable while the config file had group/other permissions"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 }

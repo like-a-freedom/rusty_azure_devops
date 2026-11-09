@@ -119,6 +119,11 @@ impl RetryStrategy for ProductionRetry {
 pub(crate) fn parse_secure_endpoint(endpoint: &str) -> Result<url::Url, AzureError> {
     let endpoint_url = url::Url::parse(endpoint)
         .map_err(|_| AzureError::Config("invalid Azure DevOps endpoint URL".to_string()))?;
+    if !endpoint_url.username().is_empty() || endpoint_url.password().is_some() {
+        return Err(AzureError::Config(
+            "Azure DevOps endpoint must not contain embedded credentials".to_string(),
+        ));
+    }
     let is_loopback_http = endpoint_url.scheme() == "http"
         && match endpoint_url.host() {
             Some(url::Host::Ipv4(address)) => address.is_loopback(),
@@ -143,6 +148,7 @@ pub struct ProductionFallback {
     endpoint: String,
     pat: String,
     api_versions: Vec<String>,
+    http_client: Option<reqwest::Client>,
 }
 
 impl ProductionFallback {
@@ -158,7 +164,22 @@ impl ProductionFallback {
             endpoint,
             pat: pat.into(),
             api_versions,
+            http_client: None,
         })
+    }
+
+    pub(crate) fn with_http_client(mut self, http_client: reqwest::Client) -> Self {
+        self.http_client = Some(http_client);
+        self
+    }
+
+    fn client_for_request(&self) -> Result<reqwest::Client, AzureError> {
+        match &self.http_client {
+            Some(client) => Ok(client.clone()),
+            None => reqwest::Client::builder()
+                .build()
+                .map_err(|e| AzureError::Http(crate::http_error::HttpError::transport(e))),
+        }
     }
 
     /// Build the URL for an on-prem fallback request, joining endpoint, path,
@@ -178,9 +199,7 @@ impl ProductionFallback {
 impl OnPremFallback for ProductionFallback {
     fn get<'a>(&'a self, path: &'a str) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
-            let client = reqwest::Client::builder()
-                .build()
-                .map_err(|e| AzureError::Http(crate::http_error::HttpError::transport(e)))?;
+            let client = self.client_for_request()?;
             let mut errors: Vec<String> = Vec::new();
             for api in self.api_versions.iter() {
                 let url_s = Self::on_prem_url(&self.endpoint, path, api);
@@ -235,9 +254,7 @@ impl OnPremFallback for ProductionFallback {
         api_version: &'a str,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
-            let client = reqwest::Client::builder()
-                .build()
-                .map_err(|e| AzureError::Http(crate::http_error::HttpError::transport(e)))?;
+            let client = self.client_for_request()?;
             let url_s = Self::on_prem_url(&self.endpoint, path, api_version);
             let auth_variants = [format!(":{}", self.pat), format!("user:{}", self.pat)];
             let mut errors: Vec<String> = Vec::new();
