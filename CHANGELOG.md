@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-11-09
+
+### Changed
+- Dependency upgrades to latest available versions: rmcp 3.5.1 -> 3.9.0, tokio 1.53.3 -> 1.54.1, htmd 0.5.5 -> 0.5.6, jsonschema 0.58.6 -> 0.61.0 (dev/test dependency; pre-1.0 bump), plus transitive lockfile updates (pulldown-cmark, syn, uuid, async-compression, and others). No source changes were required; tests, clippy and fmt all green.
+
 ## [0.5.0] - 2026-11-09
 
 ### Security
