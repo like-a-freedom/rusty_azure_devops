@@ -1,345 +1,300 @@
 # SRS — rusty_azure_devops
 
-**Версия:** 0.1 (черновик)
-**Дата:** 2025-12-20
+**Version:** 0.1 (draft)
+**Date:** 2025-12-20
 
----
+## 1. Project overview
 
-## 1. Краткое описание проекта ✨
+**Name:** rusty_azure_devops
 
-**Название:** rusty_azure_devops
+**Purpose:** An MCP (Model Context Protocol) server in Rust (stable) that works with an on-premises Azure DevOps Server through the REST API. It exposes a set of tools over stdio (rmcp) for basic Work Item (WI) operations: create, read (fields, links, comments), update, and search.
 
-**Назначение:** MCP-сервер (Model Context Protocol) на языке Rust (stable) для взаимодействия с локальным Azure DevOps Server (on‑prem) через REST API. Сервер предоставляет набор инструментов (tools) по stdio (rmcp) для базовой работы с Work Items (WI): создание, чтение (поля, ссылки, комментарии), обновление и поиск.
+**Constraints:**
+- Authentication may be omitted (a trusted environment is assumed); PAT support is configured optionally.
+- No attachments in the first release.
+- No local persistence or cache is required.
+- Works with any project the API token has access to.
 
-**Ограничения:**
-- Аутентификация может быть опущена (предполагается доверенная среда), поддержка PAT конфигурируется опционально.
-- Вложений (attachments) в первом релизе нет.
-- Локальное постоянство/кэш не требуется.
-- Поддерживается работа с любыми проектами, к которым есть доступ по API‑токену.
+## 2. Goals and scope
 
----
+- Provide a convenient, extensible MCP interface for Azure DevOps Work Item operations.
+- Support integration with external automations and LLM agents over stdio (rmcp).
+- Focus on correctness of operations (atomicity, concurrency control via rev/test), clear errors, and predictable behavior.
 
-## 2. Цели и область применения 🎯
+## 3. Terminology and definitions
 
-- Обеспечить удобный, расширяемый MCP-интерфейс для операций с Work Items Azure DevOps.
-- Поддерживать интеграцию с внешними автоматизациями и LLM-агентами через stdio (rmcp).
-- Фокус на корректности операций (atomicity, concurrency control via rev/test), ясных ошибках и предсказуемом поведении.
-
----
-
-## 3. Терминология и определения 📚
-
-- WI — Work Item в Azure DevOps (Bug, Task, User Story, Custom и др.).
+- WI — a Work Item in Azure DevOps (Bug, Task, User Story, Custom, etc.).
 - MCP — Model Context Protocol (rmcp implementation).
-- rmcp — Rust crate для реализации MCP (поддерживает stdio transport, tools, schema validation и пр.).
-- azclient — внутренняя абстракция HTTP-клиента для общения с Azure DevOps REST API.
+- rmcp — the Rust crate for implementing MCP (supports stdio transport, tools, schema validation, etc.).
+- azclient — the internal HTTP client abstraction for talking to the Azure DevOps REST API.
 
-## 3.1 Конфигурация — переменные окружения (обязательно)
+## 3.1 Configuration: environment variables (required)
 
-**Все** параметры конфигурации задаются исключительно через переменные окружения (ENV). Ни одна команда MCP не изменяет или сохраняет конфигурацию между запусками — конфиг читается при старте из окружения.
+**All** configuration parameters are set exclusively through environment variables (ENV). No MCP command changes or saves configuration between runs; the config is read from the environment at startup.
 
-Обязательные и рекомендованные переменные окружения:
+Required and recommended environment variables:
 
-- `ADO_TOKEN` (обязательно) — Personal Access Token (PAT) для доступа к Azure DevOps; без него сервер не запускается.
-- `ADO_BASE_URL` (обязательно) — базовый URL Azure DevOps on‑prem или облака (например `https://dev.azure.com/org` или `https://ado-server/collection`). Для удалённых серверов обязателен HTTPS; HTTP разрешён только для loopback-адресов локальных сервисов и тестов. `ADO_BASE_URL` должен быть установлен вместе с `ADO_TOKEN`.
-- `ADO_ORGANIZATION` (опционально) — организация (используется вместе с `ADO_BASE_URL` при необходимости).
-- `ADO_API_VERSION` (опционально) — версия REST API; по умолчанию используется **latest** (если поддерживается клиентской библиотекой) и может быть переопределена через ENV.
-- `ADO_DEFAULT_PROJECT` (опционально) — если задан, используется как проект по умолчанию для команд, где `project` не передан.
-- `ADO_CA_CERT` (опционально) — путь к PEM/DER custom CA для TLS-соединений с on-prem сервером; сертификат добавляется в HTTP-клиенты Azure SDK и fallback отдельно, без изменения `SSL_CERT_FILE`.
-- `RUST_LOG` — уровень логирования (`info`, `warn`, `debug`, `trace`).
+- `ADO_TOKEN` (required) — the Personal Access Token (PAT) for accessing Azure DevOps; the server does not start without it.
+- `ADO_BASE_URL` (required) — the base URL of the Azure DevOps on-prem or cloud instance (for example `https://dev.azure.com/org` or `https://ado-server/collection`). HTTPS is mandatory for remote servers; HTTP is allowed only for loopback addresses of local services and tests. `ADO_BASE_URL` must be set together with `ADO_TOKEN`.
+- `ADO_ORGANIZATION` (optional) — the organization (used together with `ADO_BASE_URL` when needed).
+- `ADO_API_VERSION` (optional) — the REST API version; the default is **latest** (when supported by the client library) and can be overridden via ENV.
+- `ADO_DEFAULT_PROJECT` (optional) — if set, used as the default project for commands where `project` is not passed.
+- `ADO_CA_CERT` (optional) — path to a PEM/DER custom CA for TLS connections to the on-prem server; the certificate is added to the Azure SDK HTTP clients and the fallback separately, without changing `SSL_CERT_FILE`.
+- `RUST_LOG` — the log level (`info`, `warn`, `debug`, `trace`).
 
-Примечание: конфигурация может быть изменена только путём обновления переменных окружения и перезапуска сервиса.
+Note: configuration changes only by updating environment variables and restarting the service.
 
 Update 2026-10: primary human/agent path is ado-cli login (see FR-8); the ENV-only statement above applies to the MCP server runtime.
 
----
+## 4. Functional requirements (FR)
 
-## 4. Функциональные требования (FR) ✅
-
-Каждое требование включает краткое описание и критерии приёмки.
+Each requirement includes a short description and acceptance criteria.
 
 FR-1: Create Work Item
-- Описание: Инструмент `create_work_item` принимает `project`, `type` (любой тип WI), обязательные поля (минимум `System.Title`) и опциональные поля/relations/comments.
-- Реализация: формируется `application/json-patch+json` документ и отправляется POST `/workitems/{type}?api-version=<version>`.
-- Приёмка: возвращается объект с новыми `id`, `url` и набором полей, подтверждённым сервером Azure.
+- Description: the `create_work_item` tool takes `project`, `type` (any WI type), required fields (at least `System.Title`), and optional fields/relations/comments.
+- Implementation: an `application/json-patch+json` document is built and sent to POST `/workitems/{type}?api-version=<version>`.
+- Acceptance: returns an object with the new `id`, `url`, and the field set confirmed by the Azure server.
 
 FR-2: Get Work Item
-- Описание: `get_work_item` возвращает WI по `id` (или списку `ids`) с опциональными параметрами `fields` и `$expand` (Relations/Links/All/Comments).
-- Реализация: GET `/workitems/{id}?fields=...&$expand=...`.
-- Приёмка: возвращены поля и, при запросе `$expand`, relations и комментарии.
+- Description: `get_work_item` returns a WI by `id` (or a list of `ids`) with optional `fields` and `$expand` (Relations/Links/All/Comments) parameters.
+- Implementation: GET `/workitems/{id}?fields=...&$expand=...`.
+- Acceptance: the fields are returned, plus relations and comments when `$expand` is requested.
 
 FR-3: Update Work Item
-- Описание: `update_work_item` принимает JSON Patch (операции add/replace/remove/test и т.д.) и опционально параметр `expected_rev` (число). Если указан `expected_rev`, агент включит в JSON Patch `test` op на `/rev` для optimistic concurrency; при несовпадении вернётся ошибка `Conflict` (409). Если `expected_rev` не указан, PATCH выполняется без предварительного теста (как обычный PATCH), но рекомендуется передавать `expected_rev`, чтобы избежать потерянных обновлений.
-- Реализация: PATCH `/workitems/{id}?api-version=...` с Content-Type `application/json-patch+json` и, при наличии `expected_rev`, первой операцией `test { "op":"test","path":"/rev","value":<expected_rev> }`.
-- Приёмка: при успешном применении возвращается обновлённый WI с увеличенной ревизией; при несовпадении rev — возвращается `Conflict` с пояснением и текущей ревизией.
+- Description: `update_work_item` takes a JSON Patch (add/replace/remove/test operations, etc.) and an optional `expected_rev` parameter (a number). When `expected_rev` is set, the agent includes a `test` op on `/rev` in the JSON Patch for optimistic concurrency; a mismatch returns a `Conflict` error (409). When `expected_rev` is omitted, the PATCH runs without a preceding test, like a plain PATCH; passing `expected_rev` is recommended to avoid lost updates.
+- Implementation: PATCH `/workitems/{id}?api-version=...` with Content-Type `application/json-patch+json` and, when `expected_rev` is present, `test { "op":"test","path":"/rev","value":<expected_rev> }` as the first operation.
+- Acceptance: on success, the updated WI with an incremented revision is returned; on a rev mismatch, a `Conflict` with an explanation and the current revision.
 
 FR-4: Search Work Items
-- Описание: `search_work_items` поддерживает WIQL и упрощённые фильтры; возвращает список id; опция `details=true` инициирует batch GET `/workitems?ids=...` для получения полных записей.
-- Реализация: POST `/wit/wiql` → получение id → batch GET `/workitems?ids=...` (детали).
-- Ограничения: в первом релизе PAGINATION не реализована — по умолчанию применяется `limit=100` (может быть переопределён параметром запроса). Если количество найденных id превышает практический порог использования, клиенту следует выполнить дополнительные запросы вручную.
-- Приёмка: WIQL запрос возвращает ожидаемые id (ограничен до `limit`); при `details=true` — корректно возвращаются поля для возвращённых id.
+- Description: `search_work_items` supports WIQL and simplified filters; it returns a list of ids; `details=true` triggers a batch GET `/workitems?ids=...` for full records.
+- Implementation: POST `/wit/wiql` → collect ids → batch GET `/workitems?ids=...` (details).
+- Constraints: pagination is not implemented in the first release. A `limit=100` applies by default (overridable by a request parameter). When the number of matched ids exceeds the practical usage threshold, the client should issue additional queries manually.
+- Acceptance: a WIQL query returns the expected ids (capped at `limit`); with `details=true` the fields for the returned ids are returned correctly.
 
 FR-5: Manage Work Item Links
-- Описание: `manage_work_item_link` — инструмент для добавления и удаления связей между рабочими элементами (тип связи: `System.LinkTypes.Related`, `System.LinkTypes.Hierarchy-Forward`/`Hierarchy-Reverse`, `System.LinkTypes.Dependency-Forward` и др.). Поддерживает операции `add` и `remove`.
-- Входные параметры (MVP): `action` ("add" | "remove"), `source_id` (ид рабочего элемента, который изменяется), `target` (ид рабочего элемента-цели), `link_type` (опционально, по умолчанию `System.LinkTypes.Related`), `attributes` (опционально).
-- Реализация: для `add` формируется JSON Patch op `add` на `/relations/-` с `{ "rel": <link_type>, "url": <target_url>, "attributes": ... }` и вызывается `update_work_item`; для `remove` выполняется `get_work_item` для поиска индекса существующей связи и `remove` op по `/relations/{index}`.
-- Приёмка:
-  - Успешный `add` возвращает обновлённый список связей в результате.
-  - Успешный `remove` удаляет связь и возвращает обновлённый список связей.
-  - Негативные случаи: удаление несуществующей связи возвращает понятную ошибку `relation not found`.
-  - Схемы входа и выхода добавлены в `docs/schemas/manage_work_item_link.schema.json` и `manage_work_item_link_result.schema.json`.
+- Description: `manage_work_item_link` adds and removes links between work items (link types: `System.LinkTypes.Related`, `System.LinkTypes.Hierarchy-Forward`/`Hierarchy-Reverse`, `System.LinkTypes.Dependency-Forward`, etc.). It supports `add` and `remove`.
+- Input parameters (MVP): `action` ("add" | "remove"), `source_id` (the id of the work item being changed), `target` (the id of the target work item), `link_type` (optional, defaults to `System.LinkTypes.Related`), `attributes` (optional).
+- Implementation: for `add`, a JSON Patch `add` op is built on `/relations/-` with `{ "rel": <link_type>, "url": <target_url>, "attributes": ... }` and `update_work_item` is called; for `remove`, `get_work_item` finds the index of the existing relation and a `remove` op targets `/relations/{index}`.
+- Acceptance:
+  - A successful `add` returns the updated list of relations in the result.
+  - A successful `remove` deletes the relation and returns the updated list of relations.
+  - Negative case: removing a nonexistent relation returns a clear `relation not found` error.
+  - Input and output schemas live in `docs/schemas/manage_work_item_link.schema.json` and `manage_work_item_link_result.schema.json`.
 
-FR-5: Управленческие команды и обнаружение проектов
-- Описание: Конфигурация задаётся только через ENV (см. секцию 3.1); MCP предоставляет инструменты только для чтения/инспекции конфигурации и динамического обнаружения ресурсов.
-- Команды:
-  - `get_status` — возвращает текущую конфигурацию (без секретов) и состояние подключения к Azure DevOps.
-  - `list_projects` — динамически запрашивает и возвращает список проектов, доступных для учётных данных из `ADO_TOKEN`.
-- Проект по-умолчанию: если `project` не передан в инструменте, MCP использует в порядке приоритетов: 1) `ADO_DEFAULT_PROJECT` (если задан), 2) если доступен ровно один проект для токена — используется он, 3) иначе команда вернёт ошибку, требующую явного указания `project`.
-- Примечание: команды `set_instance` / `set_token` **не поддерживаются** — изменение конфигурации требует обновления ENV и перезапуска сервиса.
+FR-5: Management commands and project discovery
+- Description: configuration is set only via ENV (see section 3.1); MCP exposes only tools for reading/inspecting configuration and dynamically discovering resources.
+- Commands:
+  - `get_status` — returns the current configuration (without secrets) and the connection state to Azure DevOps.
+  - `list_projects` — queries and returns the list of projects available to the credentials in `ADO_TOKEN`.
+- Default project: when `project` is not passed to a tool, MCP applies this priority order: 1) `ADO_DEFAULT_PROJECT` (if set), 2) if exactly one project is available for the token, that project is used, 3) otherwise the command returns an error requiring an explicit `project`.
+- Note: `set_instance` / `set_token` commands are **not supported**; changing configuration requires updating ENV and restarting the service.
 
-FR-6: StdIO / rmcp Contract
-- Описание: все команды регистрируются как rmcp tools с явными JSON-схемами входа/выхода (schemars).
-- Приёмка: схемы валидируются, клиентская совместимость сохранена.
+FR-6: StdIO / rmcp contract
+- Description: every command is registered as an rmcp tool with explicit JSON input/output schemas (schemars).
+- Acceptance: schemas validate, and client compatibility is preserved.
 
-FR-7: Ошибки и retry
-- Транзитивные ошибки (timeouts/5xx) — retry с экспоненциальным бэкоффом (макс 3 попытки).
-- Клиентские ошибки (4xx) — не ретраить; возвращать структурированную ошибку с кодом и сообщением.
+FR-7: Errors and retry
+- Transient errors (timeouts/5xx): retry with exponential backoff (max 3 attempts).
+- Client errors (4xx): do not retry; return a structured error with the code and message.
 
-FR-8: Первичная авторизация (login)
-- Описание: CLI-команда `ado-cli login` сохраняет PAT и URL сервера в пользовательский
-  конфиг `~/.config/rusty_azure_devops/config.yaml` с правами 0600. Значения берутся из
-  флагов (`--base-url`, `--token`, `--token-stdin`), затем env (`ADO_BASE_URL`, `ADO_TOKEN`),
-  затем интерактивных запросов (только при TTY, ввод PAT скрыт). Перед сохранением
-  выполняется проверка через `list_projects` (отключается `--no-verify`). Проверка схемы
-  URL обязательна в любом случае: удалённые HTTP URL не сохраняются даже с `--no-verify`.
-- Реализация: `ado-cli login [--base-url --token|--token-stdin --organization --project
-  --api-version --ca-cert --force --no-verify --json]`, `ado-cli logout [--json]`.
-- Приёмка: без TTY и без флагов/env команда завершается быстро с `missing_value`
-  (код 1), а не блокируется на вводе; перезапись существующего конфига требует
-  `--force` (иначе `confirmation_required`, код 3); при `--json` ошибки возвращаются
-  в stderr как `{"ok":false,"reason","detail","hint"}`, stdout остаётся пустым; токен
-  не выводится ни в одном режиме.
+FR-8: Primary authorization (login)
+- Description: the `ado-cli login` CLI command saves the PAT and the server URL to the user config `~/.config/rusty_azure_devops/config.yaml` with 0600 permissions. Values come from flags (`--base-url`, `--token`, `--token-stdin`), then environment (`ADO_BASE_URL`, `ADO_TOKEN`), then interactive prompts (TTY only, PAT input hidden). Before saving, a verification through `list_projects` runs (disabled with `--no-verify`). URL scheme validation always applies: remote HTTP URLs are not saved even with `--no-verify`.
+- Implementation: `ado-cli login [--base-url --token|--token-stdin --organization --project --api-version --ca-cert --force --no-verify --json]`, `ado-cli logout [--json]`.
+- Acceptance: without a TTY and without flags or env values, the command exits quickly with `missing_value` (exit code 1) instead of blocking on input; overwriting an existing config requires `--force` (otherwise `confirmation_required`, exit code 3); with `--json`, errors go to stderr as `{"ok":false,"reason","detail","hint"}` and stdout stays empty; the token is never printed in any mode.
 
----
+## 5. Non-functional requirements (NFR)
 
-## 5. Нефункциональные требования (NFR) ⚙️
+NFR-1: Performance
+- Targets: P50 < 300ms for simple GET/CREATE; P95 < 1s under normal LAN conditions.
 
-NFR-1: Производительность
-- Цели: P50 < 300ms для простых GET/CREATE; P95 < 1s в нормальных условиях локальной сети.
+NFR-2: Scalability
+- Expected load: roughly 0-100 RPS; the architecture should allow scaling the azclient if needed.
 
-NFR-2: Масштабируемость
-- Ожидаемая нагрузка: порядка 0–100 RPS; архитектура должна позволять масштабировать azclient если потребуется.
+NFR-3: Reliability
+- Availability target: 99.5% in a production environment under normal load.
 
-NFR-3: Надёжность
-- Цель availability: 99.5% в эксплуатационной среде при обычной нагрузке.
+NFR-4: Extensibility
+- The `AzureDevOpsClient` interface is a Rust trait; new backend drivers can be added without changing `rusty_azure_devops`.
 
-NFR-4: Расширяемость
-- Интерфейс `AzureDevOpsClient` реализован как Rust trait; добавление новых backend‑драйверов возможно без изменений в `rusty_azure_devops`.
+NFR-5: Observability and logging
+- Structured logging: a `tracing`-compatible format is required, with levels `info`, `warn`, `debug`, `trace`. The log format is JSON-compatible with fields `timestamp`, `level`, `target`, `message`, `context`.
+- Metrics: Prometheus/metrics are not required in the first release; additional metrics can be added later on request.
+- Tracing: OpenTelemetry is optional and not required for the MVP. Logs must not contain secrets (API tokens, keys, credentials).
 
-NFR-5: Наблюдаемость и логирование
-- Структурированное логирование: обязателен `tracing`-совместимый формат с уровнями `info`, `warn`, `debug`, `trace`. Формат логов — JSON-совместимый с полями `timestamp`, `level`, `target`, `message`, `context`.
-- Метрики: Prometheus/metrics не требуются в первом релизе; дополнительные метрики могут быть добавлены позже по запросу.
-- Трассировка: OpenTelemetry — опционально и не обязательна для MVP. Логи не должны содержать секретов (API токены, ключи, полномочия).
+NFR-6: Security
+- Authentication is mandatory: the PAT must be provided through the `ADO_TOKEN` and `ADO_BASE_URL` environment variables (see section 3.1). Without valid values for these variables, the service does not start.
+- Secrets must not leak into diagnostic errors or logs. Fallback errors contain only the API version, the HTTP status, or a generic reason; the PAT and the server response body are not included.
+- Provide guidance on minimal PAT scopes and token rotation.
+- Config protection: a `config.yaml` file (next to the binary or in `~/.config/rusty_azure_devops/`) that is group/world-writable (`0o022`) is not read; the command fails. New config directories are created with mode `0700`; existing directories are not modified. An existing config file is tightened to `0600` through the open handle before new secrets are written.
+- The endpoint URL must be HTTPS (HTTP is allowed only for loopback); URLs with a username/password (userinfo) are rejected when the config is loaded.
+- In human-readable CLI output, control characters (ESC, BEL, CR, etc.) in text coming from Azure DevOps are escaped into visible `\u{XX}` form; newlines and tabs are preserved. JSON output is produced by the serializer (structured).
+- The CI pipeline uses least privilege: the workflow level is `contents: read`; write is needed only by the jobs that publish release artifacts (`contents: write`) and the Docker image (`packages: write`).
 
-NFR-6: Безопасность
-- Аутентификация обязательна: PAT должен быть предоставлен через ENV `ADO_TOKEN` и `ADO_BASE_URL` (см. раздел 3.1). Без действительных значений этих переменных сервис не запускается.
-- Секреты не должны попадать в диагностические ошибки или логи. Fallback-ошибки содержат только версию API, HTTP-статус или обобщённую причину; PAT и тело ответа сервера не включаются.
-- Подготовить инструкции по минимальным правам PAT (scope) и ротации токенов.
-- Защита конфига: файл `config.yaml` (рядом с бинарником или в `~/.config/rusty_azure_devops/`) с правами на запись для группы/остальных (`0o022`) не читается — команда завершается ошибкой. Новые каталоги конфигурации создаются с правами `0700`; существующие каталоги не изменяются. Существующий файл конфига ужесточается до `0600` через открытый дескриптор до записи новых секретов.
-- URL endpoint должен быть HTTPS (HTTP допускается только для loopback); ссылки с username/password (userinfo) отклоняются при загрузке конфигурации.
-- В человекочитаемом выводе CLI control-символы (ESC, BEL, CR и др.) в текстах из Azure DevOps экранируются в видимый вид `\u{XX}`; переводы строк и табы сохраняются. JSON-вывод отдаётся сериализатором (структурирован).
-- CI-pipeline использует least-privilege: уровень workflow — `contents: read`; запись нужна только job'ам публикации релизных артефактов (`contents: write`) и Docker-образа (`packages: write`).
+## 6. Architecture and design
 
----
-
-## 6. Архитектура и дизайн 🔧
-
-### Компоненты
-1. `rusty_azure_devops` — rmcp-based сервер: регистрирует инструменты, обрабатывает stdio transport (stdin/stdout) через `rmcp`, выполняет валидацию схем, управление таймаутами, маршрутизацию инструментов и lifecycle запросов/ответов.
-2. `azclient` — `AzureDevOpsClient` trait и default тонкая реализация поверх `azure_devops_rust_api` (async). Инкапсулирует: API-versioning, retry/backoff с jitter, обработку rate-limit (429/`Retry-After`) и предоставляет высокоуровневые операции (create/get/update/search WI). Note: the retry/backoff utility is implemented inside `azure_devops_client::retry` (no separate crate for retry utilities is used).
-3. `config` — ENV-only конфиг-лоадер и логика обнаружения проектов (`list_projects`), включая правило выбора `ADO_DEFAULT_PROJECT` или автоматическое использование единственного доступного проекта.
-4. `logging` — централизованная подсистема структурированного логирования (`tracing`, JSON-compatible) с фильтрацией/санитизацией секретов и поддержкой уровней `info|warn|debug|trace`.
+### Components
+1. `rusty_azure_devops` — the rmcp-based server: registers tools, handles the stdio transport (stdin/stdout) through `rmcp`, validates schemas, manages timeouts, routes tools, and handles request/response lifecycle.
+2. `azclient` — the `AzureDevOpsClient` trait and a default thin implementation over `azure_devops_rust_api` (async). It encapsulates API versioning, retry/backoff with jitter, and rate-limit handling (429/`Retry-After`), and provides high-level operations (create/get/update/search WI). Note: the retry/backoff utility is implemented inside `azure_devops_client::retry` (no separate crate for retry utilities is used).
+3. `config` — the ENV-only config loader and project discovery logic (`list_projects`), including the `ADO_DEFAULT_PROJECT` selection rule or automatic use of the single available project.
+4. `logging` — a centralized structured logging subsystem (`tracing`, JSON-compatible) with secret filtering/sanitization and support for `info|warn|debug|trace` levels.
 
 ### Dataflow
 Client → stdio/rmcp → rusty_azure_devops.tool → azclient (HTTP) → Azure DevOps → azclient → rusty_azure_devops → client (JSON).
 
-### Design Decisions
-- Использовать `rmcp` crate для реализации stdio transport и серверной логики (подробности см. ниже: релевантные фичи `rmcp`).
-- `AzureDevOpsClient` как trait для легко тестируемых mock/fake реализаций.
-- Retry/backoff встроен в `azclient`.
-- Versioning конфигурации `api-version` — параметризуемая настройка.
+### Design decisions
+- Use the `rmcp` crate for the stdio transport and the server logic (details below, under "Notes on `rmcp`").
+- `AzureDevOpsClient` as a trait for easily testable mock/fake implementations.
+- Retry/backoff is built into `azclient`.
+- The `api-version` is a parameterizable configuration setting.
 
-### Рекомендуемые crates
-- rmcp (MCP protocol, schema validation, stdio transport) — получать актуальную информацию через Context7 (см. примечание ниже).
+### Recommended crates
+- rmcp (MCP protocol, schema validation, stdio transport); get current information via Context7 (see note below).
 - tokio (async runtime)
-- reqwest (HTTP client) или hyper
-- serde / serde_json (serialisation)
+- reqwest (HTTP client) or hyper
+- serde / serde_json (serialization)
 - schemars (JSON schema generation for tool contracts)
 - tracing / opentelemetry / prometheus exporter
 - thiserror / anyhow (errors)
 - wiremock (tests)
 
----
+## 7. Notes on `rmcp` (refreshed via Context7)
 
-## 7. Информация по `rmcp` (актуализирована через Context7) 🔎
+Key points (from Context7 `/websites/rs-rmcp`):
+- `rmcp` provides ready examples for building services and transports over stdio (stdin/stdout) and TCP.
+- It supports tool registration and automatic schema validation (schemars) for inputs and outputs.
+- It ships with transport implementations (stdio, TCP, SSE client) and convenient macros/methods for working with a peer (list_tools, call_tool, etc.).
+- For a stdio server, prefer `serve_directly`/`serve_directly_with_ct` and the Transport from Standard IO examples.
 
-Ключевые моменты (из Context7 `/websites/rs-rmcp`):
-- `rmcp` предоставляет удобные примеры для создания сервисов и транспортов по stdio (stdin/stdout) и TCP.
-- Поддерживает регистрацию инструментов и автоматическую проверку схем (schemars) для входа/выхода.
-- Имеются готовые транспортные реализации (stdio, TCP, SSE client) и удобные макросы/методы для работы с peer (list_tools, call_tool и пр.).
-- Рекомендуется использовать `serve_directly`/`serve_directly_with_ct` и Transport from Standard IO примеры при создании stdio сервера.
+Link: https://docs.rs/rmcp/latest/
 
-Ссылка: https://docs.rs/rmcp/latest/
+## 8. StdIO tools (Tool Contracts): schemas (descriptive)
 
----
+Each tool must have an input and output JSON schema (schemars) and be described in `docs/schemas/`.
 
-## 8. StdIO инструменты (Tool Contracts) — схемы (описательно)
+Examples (descriptive):
 
-Каждый инструмент должен иметь JSON-схему входа и выхода (schemars) и быть описан в `docs/schemas/`.
-
-Примеры (описательно):
-
-`create_work_item` — вход:
+`create_work_item` — input:
 ```json
 { "project": "string", "type": "string", "fields": {"System.Title": "...", "Custom.Foo":"..."}, "relations": [...], "comments": [ { "author": "...", "text": "..." } ] }
 ```
-выход:
+output:
 ```json
 { "id": 123, "url": "https://...", "fields": {...} }
 ```
 
-Комментарии: MCP читает и пишет комментарии через Work Item Comments API (предпочтительный способ). Поведение:
-- При `create_work_item` если `comments` переданы — MCP сначала создаёт WI, затем вызывает Comments API для добавления каждого комментария (POST `/wit/workItems/{id}/comments`).
-- `get_work_item` при `$expand=Comments` возвращает комментарии из Comments API (включая автора, текст и timestamp).
-- Для простоты и обратной совместимости MCP также поддерживает запись кратких комментариев через JSON Patch (добавление в поле `System.History`), но рекомендуется использовать Comments API.
-`get_work_item` — вход:
+Comments: MCP reads and writes comments through the Work Item Comments API (the preferred way). Behavior:
+- In `create_work_item`, when `comments` are provided, MCP first creates the WI, then calls the Comments API for each comment (POST `/wit/workItems/{id}/comments`).
+- `get_work_item` with `$expand=Comments` returns comments from the Comments API (including author, text, and timestamp).
+- For simplicity and backward compatibility, MCP also supports writing short comments through JSON Patch (appending to the `System.History` field), but the Comments API is recommended.
+
+`get_work_item` — input:
 ```json
 { "id": 123, "project": "optional", "fields": ["System.Title","System.AssignedTo"], "expand": "All|Relations|None" }
 ```
-выход: рабочий объект WorkItem (id, rev, fields, relations, _links, comments)
+output: the WorkItem record (id, rev, fields, relations, _links, comments)
 
-`update_work_item` — вход:
+`update_work_item` — input:
 ```json
 { "id": 123, "patch": [ {"op":"add","path":"/fields/System.Tags","value":"foo"} ] }
 ```
-выход: обновлённый WorkItem
+output: the updated WorkItem
 
-`search_work_items` — вход:
+`search_work_items` — input:
 ```json
 { "project": "optional", "wiql": "SELECT [System.Id] FROM WorkItems WHERE ...", "details": true }
 ```
-выход: `{ "ids": [1,2,3], "total": 3 }` (при details=true — добавлять подробные записи)
+output: `{ "ids": [1,2,3], "total": 3 }` (with details=true, the detailed records are added)
 
----
+## 9. Error handling and retry policy (details)
 
-## 9. Обработка ошибок и политика повтора (детали) ⚠️
+- Transient errors (timeouts, network errors, 5xx): retry with exponential backoff and jitter (for example 100ms, 300ms, 900ms), max 3 attempts; log each attempt and the final outcome.
+- Rate limiting (429): when Azure returns 429 with a `Retry-After` header, MCP must honor `Retry-After` and repeat the request after the indicated delay, applying the general retry logic with backoff where needed.
+- Revision conflicts: return an error with code `Conflict` and an explanation (current revision != expected), with the recommendation to run `get_work_item` and retry.
+- Input validation: handled at the MCP tool level, returning 400 with the field and error description.
 
-- Транзитивные ошибки (timeouts, сетевые ошибки, 5xx): retry policy — экспоненциальный бэк‑офф с jitter (например 100ms, 300ms, 900ms), max 3 попытки; логировать попытки и итоговое состояние.
-- Rate limiting (429): если Azure возвращает 429 и заголовок `Retry-After`, MCP обязан уважать `Retry-After` и повторить запрос после указанного времени, при необходимости применив общий retry logic с backoff.
-- Конфликты ревизий: вернуть ошибку с кодом `Conflict` и пояснением (текущая ревизия != ожидаемая), дать рекомендации — выполнить `get_work_item` и повторить.
-- Валидация входных данных: на уровне MCP инструментов — возвращать 400 с описанием поля/ошибки.
-
----
-
-## 10. План тестирования и приёмки ✅
+## 10. Testing and acceptance plan
 
 ### Unit tests
-- Парсинг входных сообщений, валидация схем, helper-функции (patch generation) — все покрываются unit-тестами.
+- Input message parsing, schema validation, and helper functions (patch generation) are fully covered by unit tests.
 
 ### Integration tests
-- Тестировать `azclient` против `wiremock` или аналогичного mock‑сервера с зафиксированными ответами Azure.
-- Тестировать retry/timeout/404/5xx поведения.
+- Test `azclient` against `wiremock` or a similar mock server with canned Azure responses.
+- Test retry/timeout/404/5xx behavior.
 
 ### End-to-end tests
-- E2E против локального Azure DevOps Server (если доступен) или тесты с записью/воспроизведением реальных ответов (record/replay fixtures).
+- E2E against a local Azure DevOps Server (when available), or tests that record and replay real responses (record/replay fixtures).
 
 ### Contract tests (stdio)
-- Проверять соответствие схем: корректные и негативные случаи; таймауты транспорта.
+- Check schema conformance: positive and negative cases; transport timeouts.
 
-### Acceptance criteria по основным FR
-- Create: создаёт WI и возвращает id/url; поля совпадают.
-- Get: возвращает fields и relations при `$expand`.
-- Update: применяет patch; rev увеличивается; на невыполнении теста возвращается Conflict.
-- Search: WIQL возвращает ожидаемые id; details → batch GET возвращает корректные поля.
+### Acceptance criteria for the key FRs
+- Create: creates a WI and returns id/url; the fields match.
+- Get: returns fields and relations with `$expand`.
+- Update: applies the patch; rev increments; a failed test op returns Conflict.
+- Search: WIQL returns the expected ids; details → the batch GET returns correct fields.
 
 ### CI
 - GitHub Actions: lint, clippy, cargo test (unit + integration), validate schemars, run contract tests.
 
----
+## 11. Risks and limitations
 
-## 11. Риски и ограничения ⚠️
+- Azure REST API versioning: different on-prem installations may support different preview versions; keep `api-version` configurable.
+- Without attachments and caching in the first release, some user workflows are limited.
+- Trusted environment assumption: if MCP is deployed in a less trusted network, authentication/authorization and encryption must be added.
 
-- Версионирование Azure REST API: разные on‑prem инсталляции могут поддерживать разные preview-версии; оставить параметр `api-version` настраиваемым.
-- Отсутствие attachments и кеша в первом релизе ограничивает рабочие сценарии некоторыми пользователями.
-- Trusted environment assumption: если MCP развернуто в менее доверенной сети, необходимо добавить auth/authorization и шифрование.
+## 12. Open questions (need confirmation)
 
----
+1. Do we need default WI field/template support (an include/exclude set of standard fields)?
+2. Do we need bulk operations (bulk create/update)?
+3. The default log level and retention requirements for metrics/logs.
 
-## 12. Открытые вопросы (требуют подтверждения) ❓
+## 13. Acceptance checklist (short)
 
-1. Требуется ли поддержка специальных полей/шаблонов WI по-умолчанию (выпилить/включить набор стандартных полей)?
-2. Нужна ли поддержка массовых операций (bulk create/update)?
-3. Уровень логирования по умолчанию и требования к retention для метрик/логов.
+- [ ] Create WI: id+url and fields are returned correctly.
+- [ ] Get WI: fields+relations+comments are available with `$expand`.
+- [ ] Update WI: the patch applies and rev increments; conflicts are handled correctly.
+- [ ] Search WI: WIQL → ids; details → correct records.
+- [ ] StdIO tools: schemas validate and match the contract.
+- [x] Retry & error handling: covered by tests.
 
----
-
-## 13. Acceptance checklist (короткий) ✅
-
-- [ ] Create WI: id+url и поля корректно возвращаются.
-- [ ] Get WI: fields+relations+comments доступны при `$expand`.
-- [ ] Update WI: patch применяется и rev инкрементируется; конфликты корректно обрабатываются.
-- [ ] Search WI: WIQL → ids; details → корректные записи.
-- [ ] StdIO tools: схемы валидируются и соответствуют контракту.
-- [x] Retry & error handling: покрыты тестами.
-
----
-
-## 14. Приложения и ссылки 🔗
+## 14. Appendices and links
 
 - Azure DevOps REST API: https://learn.microsoft.com/en-us/rest/api/azure/devops/
-- Работа с WI (Create/Get/Update/WIQL): https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/
-- rmcp crate (актуализировано через Context7): https://docs.rs/rmcp/latest/
+- Working with work items (Create/Get/Update/WIQL): https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/
+- rmcp crate (refreshed via Context7): https://docs.rs/rmcp/latest/
 - Reference implementation (study): https://github.com/like-a-freedom/rusty-intervals-mcp
 - Implementation Plan: ./IMPLEMENTATION_PLAN.md
 
----
+## 15. Recommendation: reuse `azure_devops_rust_api` for the client implementation
 
-## 15. Рекомендация: переиспользовать `azure_devops_rust_api` (реализация клиента)
+In short: rather than hand-writing a low-level HTTP client, reuse the official `azure_devops_rust_api` crate (v0.32.0). It is auto-generated from the Azure DevOps OpenAPI specification and already contains the `wit` (Work Item Tracking) module, WIQL/search, and the related clients.
 
-Коротко: вместо написания низкоуровневого HTTP‑клиента вручную рекомендуется переиспользовать официальный crate `azure_devops_rust_api` (v0.32.0) — он автогенерируется из OpenAPI‑спецификации Azure DevOps и уже содержит модуль `wit` (Work Item Tracking), WIQL/search и сопутствующие клиенты.
+Why this is safe and worthwhile:
+- It covers many endpoints, including Work Item Tracking and Search.
+- It supports authentication through `azure_identity` and PAT (`ADO_TOKEN`), and is tested and maintained by Microsoft.
+- It supports feature flags, so only the needed modules (for example `wit`, `work`, `search`) can be enabled to reduce compile size.
 
-Почему это безопасно и выгодно:
-- Покрывает множество эндпоинтов (включая Work Item Tracking и Search).
-- Поддерживает аутентификацию через `azure_identity` и PAT (`ADO_TOKEN`), уже протестирован и поддерживается Microsoft.
-- Поддерживает feature‑флаги; можно подключить только нужные модули (например `wit`, `work`, `search`) чтобы уменьшить размер компиляции.
-
-Как интегрировать в `rusty_azure_devops`:
-1. Добавить зависимость в `Cargo.toml` (фиксировать минимальную проверенную версию):
+How to integrate into `rusty_azure_devops`:
+1. Add the dependency to `Cargo.toml` (pin the minimum verified version):
 
 ```toml
 azure_devops_rust_api = { version = "0.32.0", features = ["wit","work","search"] }
 ```
 
-2. Реализовать `AzureDevOpsClient` trait (описан в разделе NFR/архитектуре) через thin wrapper над `azure_devops_rust_api`:
-- `create_work_item` → вызов соответствующего метода в `wit` (формирование JSON Patch, POST)
-- `get_work_item` → `wit::work_items_client().get(...)` с нужными query params (`$expand`, `fields`)
+2. Implement the `AzureDevOpsClient` trait (described in the NFR/architecture section) as a thin wrapper over `azure_devops_rust_api`:
+- `create_work_item` → call the corresponding `wit` method (build the JSON Patch, POST)
+- `get_work_item` → `wit::work_items_client().get(...)` with the needed query params (`$expand`, `fields`)
 - `update_work_item` → `wit::work_items_client().update(...)` (JSON Patch)
-- `search_work_items` → `wit::wiql_client().query_by_wiql(...)` и затем batch GET при `details=true`
+- `search_work_items` → `wit::wiql_client().query_by_wiql(...)`, then a batch GET when `details=true`
 
-3. Инкапсулировать логику retry/backoff, конвертацию ошибок и обработку конфликтов (`rev`/`test`) в wrapper, чтобы интерфейс MCP оставался предсказуемым и простым для тестирования.
+3. Keep retry/backoff, error conversion, and conflict handling (`rev`/`test`) inside the wrapper so the MCP interface stays predictable and easy to test.
 
-4. Тестирование: написать integration tests, использующие `azure_devops_rust_api` в режиме mock (wiremock) или run/record реальных запросов; добавить примеры в `examples/`.
+4. Testing: write integration tests that drive `azure_devops_rust_api` against mocks (wiremock) or with recorded real requests, and add examples in `examples/`.
 
-Примечание по аутентификации:
-- `azure_devops_rust_api` поддерживает несколько подходов (аз CLI, `azure_identity`, PAT). Для on‑prem возможно использовать PAT через `ADO_TOKEN` или конфиг в `.env`.
+Authentication note:
+- `azure_devops_rust_api` supports several approaches (az CLI, `azure_identity`, PAT). For on-prem, use a PAT through `ADO_TOKEN` or the `.env` config.
 
-Ссылки:
+Links:
 - Crates.io: https://crates.io/crates/azure_devops_rust_api
 - Docs.rs: https://docs.rs/azure_devops_rust_api/latest/azure_devops_rust_api/
 - Repository: https://github.com/microsoft/azure-devops-rust-api
-
----
-
-*Конец спецификации.*
-
-Если подтвердите — я добавлю JSON-схемы для инструментов в `docs/schemas/` и подготовлю PR с тестовой матрицей и заготовками тестов (unit/integration/contract).
