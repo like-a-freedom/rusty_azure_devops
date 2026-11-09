@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-09
+
+### Security
+- Config file hardening: a group/world-writable `config.yaml` is refused at load; new config directories are created with mode `0700`; an existing config file is tightened to `0600` through the open handle before new secrets are written.
+- Endpoint URLs containing a username/password (userinfo) are rejected when the config is loaded.
+- `ADO_CA_CERT` now applies the custom CA to this program's own HTTP clients instead of mutating the global `SSL_CERT_FILE` environment variable.
+- Human-readable CLI output escapes terminal control characters (ESC, BEL, CR, ...) in text coming from Azure DevOps, so a malicious work item field can no longer spoof the terminal.
+
+### Fixed
+- `update_work_item` now actually enforces `expected_rev`: it sends a JSON Patch `test` op on `/rev`, so a revision mismatch returns `Conflict` instead of silently overwriting concurrent edits.
+- Work item IDs outside the SDK's 32-bit range return a clear error instead of being silently truncated, which could previously operate on the wrong work item.
+- `manage_work_item_link` removals are scoped to the requested `link_type` (default `System.LinkTypes.Related`): a Hyperlink whose URL shares the numeric suffix of the target is no longer removed by mistake.
+
 ## [0.4.2] - 2026-10-14
 
 ### Fixed
