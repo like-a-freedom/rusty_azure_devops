@@ -1,45 +1,36 @@
 ---
 name: core
-description: "Drive the ado-cli Azure DevOps CLI — read, search, create, update, link, and comment on work items. Start here for any ado-cli operation."
+description: "Drive the ado-cli Azure DevOps CLI: read, search, create, update, link, and comment on work items. Start here for any ado-cli operation."
 ---
 
 # Azure DevOps CLI
 
-Use `ado-cli` for direct Azure DevOps work-item and project operations.
+The CLI ships this guide, so it always matches the installed version.
 
-This skill is served by the binary itself, so it always matches the installed
-version of the CLI.
+## Working sequence
 
-## Before you act
+1. Pick the operation: read, search, create, update, link, or comment. Add
+   `--json` when you parse the result.
+2. Read or search with the narrowest command that establishes the current
+   state.
+3. Mutate only when the user asked for it. Build the payload from the exact
+   `--help` output.
+4. Verify by re-reading the work item and comparing the persisted fields and
+   relations against the request. A response carrying an ID is not proof the
+   change landed.
 
-Read the current state before you change it, and read it again after you
-change it. A mutation response that carries an ID is not proof the change
-landed.
+## Recovery
 
-1. **Select the operation.** Read, search, create, update, link, or comment.
-   Add `--json` for structured handling.
-2. **Read or search** with the narrowest command that establishes the state.
-3. **Mutate only when the user asked for it.** Compile the payload from the
-   exact `--help` output, not from memory.
-4. **Verify** by re-reading the work item and comparing the persisted fields
-   and relations with the request.
-
-## Recovery gates
-
-- A tool-input error, transport error, timeout, or truncated response is
-  **ambiguous** when a mutation may have been sent. Do not blindly retry a
-  create — reconcile by exact title or known ID first.
+- A tool-input error, transport error, timeout, or truncated response leaves
+  a mutation ambiguous. Do not retry a create. Reconcile by exact title or
+  known ID first.
 - On an update, pass `--expected-rev` with the revision you read. A mismatch
-  fails the update instead of overwriting a concurrent edit.
-- Keep credentials out of commands, prompts, logs, and output. Prefer
-  `ADO_TOKEN` or `ado-cli login --token-stdin` over `--token`, which is
-  visible in `ps` and shell history.
+  fails the update rather than overwriting a concurrent edit.
+- Keep credentials out of commands, prompts, logs, and output. `ADO_TOKEN` and
+  `ado-cli login --token-stdin` stay out of argv, which `ps` and shell history
+  expose.
 
 ## Command map
-
-The full command surface — every flag, exit code, and JSON shape — is in
-`references/commands.md`. Load it when you need a command shape this file
-does not spell out.
 
 | Need | Command |
 |---|---|
@@ -57,15 +48,15 @@ does not spell out.
 
 ## References
 
-- `references/commands.md` — the complete command surface: every flag, exit
-  code, and JSON shape.
-- `references/wiql.md` — WIQL patterns that work against Azure DevOps.
-- `references/fields.md` — work item field reference names and their traps.
+- `references/commands.md`: every flag, exit code, and JSON shape.
+- `references/wiql.md`: WIQL patterns that work against Azure DevOps.
+- `references/fields.md`: field reference names and their traps.
 
 ## On-prem servers
 
-On Azure DevOps Server (on-prem TFS) several commands behave differently.
-Load the `on-prem` skill as well when the server is not `dev.azure.com`:
+Azure DevOps Server rejects parameter combinations that `dev.azure.com`
+accepts. On any server other than `dev.azure.com`, load the `on-prem` skill
+as well:
 
 ```bash
 ado-cli skills get on-prem

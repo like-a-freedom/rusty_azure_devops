@@ -1,6 +1,6 @@
 # Work item fields
 
-Fields are addressed by **reference name** — `System.Title`, not "Title".
+Fields are addressed by **reference name**: `System.Title`, not "Title".
 The reference name is what `--field` and WIQL take.
 
 ## Common fields
@@ -12,7 +12,7 @@ The reference name is what `--field` and WIQL take.
 | `System.Description` | Long description. See the round-trip note below. |
 | `System.State` | `New`, `Active`, `Resolved`, `Closed`, `Removed`. |
 | `System.WorkItemType` | `Task`, `Bug`, `Requirement`, `User Story`, `Epic`, `Feature`, `Issue`. Read-only. |
-| `System.AssignedTo` | An identity — `user@example.com`. |
+| `System.AssignedTo` | An identity, such as `user@example.com`. |
 | `System.AreaPath` | `Project\Team`. Backslashes must be escaped in a shell. |
 | `System.IterationPath` | Sprint path. |
 | `System.Tags` | Semicolon-separated: `urgent;ops`. |
@@ -39,8 +39,8 @@ ado-cli create-work-item --project MyProject --type Task --title 'Fix login' \
 `--field` may be repeated. Every `--field` value is a string; the server
 coerces it to the field's type.
 
-`--field` **overwrites**. To change a field, pass the complete new value —
-it is not a delta.
+`--field` **overwrites**. To change a field, pass the complete new value,
+not a delta.
 
 ## Read-only fields
 
@@ -54,9 +54,9 @@ Azure DevOps stores descriptions as **HTML**. The CLI converts in both
 directions so that the text you write and the text you read are the same
 Markdown:
 
-- **Reading** — `ado-cli get-work-item <ID> --description` returns
+- Reading: `ado-cli get-work-item <ID> --description` returns
   `System.Description` converted from HTML to Markdown.
-- **Writing** — `ado-cli create-work-item --description "..."` and
+- Writing: `ado-cli create-work-item --description "..."` and
   `ado-cli update-work-item <ID> --field 'System.Description=...'` convert
   the Markdown back to HTML before patching.
 

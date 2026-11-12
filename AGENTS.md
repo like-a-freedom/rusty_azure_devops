@@ -40,6 +40,58 @@ See `CONTEXT.md` for canonical terms. Key ones:
 - **Operations layer** — `WorkItemOperations`, `ProjectLookup`, `QueryOperations` (split per ADR-0010)
 - **`AdoMcpHandler`** — MCP handler routing `Tool` variants to operations; parity test enforces `Tool ⊇ CliCommand`
 
+### Built-in agent skills
+
+The CLI ships agent-facing usage guides **inside the binary**, served by
+`ado-cli skills`:
+
+```sh
+ado-cli skills list             # what is available
+ado-cli skills get core         # the main guide
+ado-cli skills get core --full  # with its reference files
+```
+
+They live in `crates/rusty_azure_devops/skills/` and are embedded at build
+time, so the guidance an agent reads always matches the binary it runs.
+
+**Maintaining the skills is part of changing the project.** A skill is a
+shipped artifact, not documentation. Any change to CLI behaviour must land
+with the matching skill edit in the same change, or agents will follow
+guidance that no longer holds.
+
+| You changed | Update |
+|---|---|
+| A CLI command, flag, or default | `skills/core/references/commands.md` |
+| An exit code or the `--json` shape | `skills/core/references/commands.md` |
+| A command added or renamed | `skills/core/references/commands.md` **and** the `CLI_TO_TOOL` / `CLI_ONLY` lists in `crates/rusty_azure_devops/tests/schema_validation.rs` |
+| The workflow an agent should follow | `skills/core/SKILL.md` |
+| A work item field, or the `System.Description` round-trip | `skills/core/references/fields.md` |
+| WIQL support, or the `search` / `get-query-results` split | `skills/core/references/wiql.md` |
+| On-prem TFS behaviour | `skills/on-prem/SKILL.md` and `skills/on-prem/references/limitations.md` |
+| Error reasons | `skills/core/references/commands.md` (the reason-token list) |
+
+Rules when editing skill content:
+
+- The command map in `skills/core/references/commands.md` is read by a test.
+  Every CLI command needs a line that starts with `ado-cli `, and no other
+  command name may appear on such a line. The test compares both directions.
+- Keep `SKILL.md` short. It is the routing entry point: what the skill is for,
+  when to load it, and the workflow. Detail belongs in `references/`, loaded
+  only when needed.
+- Do not duplicate a fact in two files. The skill and the reference each hold
+  one copy of it.
+- The `description` in the frontmatter is the routing signal an agent uses to
+  choose a skill. Say what the skill covers and when to load it.
+- Prefer a command the agent can run over a description of what the command
+  does.
+
+Check your work:
+
+```sh
+cargo test -p rusty_azure_devops --test schema_validation   # the drift guard
+cargo run --bin ado-cli -- skills get core                   # read it as an agent would
+```
+
 ### Known On-Prem TFS Limitations
 
 Published as an agent skill that ships with the binary, so it always matches
@@ -49,7 +101,7 @@ the installed CLI:
 ado-cli skills get on-prem
 ```
 
-The skill carries the full quirk matrix — the `$expand`/`fields` conflict,
+The skill carries the full quirk matrix: the `$expand`/`fields` conflict,
 `expand=Comments` being unsupported, the comments API version, the
 `System.History` fallback, and the API-version downgrade policy. Keep that
 skill as the single source of truth and change it here only when the skill

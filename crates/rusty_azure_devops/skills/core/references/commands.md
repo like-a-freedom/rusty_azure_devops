@@ -22,8 +22,8 @@ ado-cli help skills
 ## Authentication
 
 `ado-cli login` saves a PAT and the server URL to
-`~/.config/rusty_azure_devops/config.yaml` (mode 0600). It is CLI-only —
-there is no MCP tool for it.
+`~/.config/rusty_azure_devops/config.yaml` (mode 0600). It is CLI-only, with
+no MCP tool behind it.
 
 Resolution order, highest first: `--token`, `--token-stdin`, the `ADO_TOKEN`
 environment variable, then a hidden prompt (TTY only).
@@ -40,7 +40,7 @@ For automation, prefer the environment variable or `--token-stdin` over
 | 0 | Success |
 | 1 | Runtime failure |
 | 2 | Usage error |
-| 3 | Confirmation required — re-run with `--force` |
+| 3 | Confirmation required: re-run with `--force` |
 
 ## JSON output
 
@@ -50,9 +50,9 @@ code is 1. The `reason` is a stable token: `missing_value`,
 `confirmation_required`, `validation_failed`, `not_logged_in`, `io_error`,
 `skill_not_found`, `reference_not_found`.
 
-**Usage errors are not JSON.** A clap usage error — an unknown flag, a
-missing argument, `--full` together with `--ref` — is clap's plain-text
-usage message on stderr with exit code 2, with or without `--json`.
+**Usage errors are not JSON.** An unknown flag, a missing argument, or
+`--full` together with `--ref` produces clap's plain-text usage message on
+stderr with exit code 2, with or without `--json`.
 
 Success output uses `{"ok":true,...}` for the CLI-only commands (`login`,
 `logout`, `skills`). The commands that mirror an MCP tool return the bare
@@ -64,7 +64,7 @@ result object instead.
 
 Connection health, project count, and the configured default project.
 `--show-secrets` adds the non-sensitive config summary (token presence, base
-URL, default project) — never the token itself.
+URL, default project). It never prints the token.
 
 ### `ado-cli list-projects`
 

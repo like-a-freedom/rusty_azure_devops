@@ -32,7 +32,7 @@ Azure DevOps UI:
 | Created Date | `[System.CreatedDate]` |
 | Changed Date | `[System.ChangedDate]` |
 
-`[Id]` also works — Azure DevOps resolves the short form. Prefer the full
+`[Id]` also works. Azure DevOps resolves the short form. Prefer the full
 reference name; it is unambiguous.
 
 ## Conditions
@@ -66,7 +66,7 @@ WHERE [System.ChangedDate] > '2026-01-01'
 ```
 
 `CONTAINS` searches title and description. It does **not** search the
-comment thread — use `ado-cli comments` for that.
+comment thread. Use `ado-cli comments` for that.
 
 ## Ordering and limits
 
@@ -97,4 +97,4 @@ accepted.
 
 A WIQL that names a field the project does not have fails with a server
 error naming the field. Check the field's reference name against the table
-above first — a display name is the usual mistake.
+above first. A display name is the usual mistake.
