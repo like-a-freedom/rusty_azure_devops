@@ -57,7 +57,8 @@ does not spell out.
 
 ## References
 
-- `references/commands.md` — the complete command surface.
+- `references/commands.md` — the complete command surface: every flag, exit
+  code, and JSON shape.
 - `references/wiql.md` — WIQL patterns that work against Azure DevOps.
 - `references/fields.md` — work item field reference names and their traps.
 

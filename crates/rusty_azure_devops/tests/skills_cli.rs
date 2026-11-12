@@ -196,9 +196,120 @@ fn full_and_ref_together_is_a_usage_error() {
         .code(2);
 }
 
+#[test]
+fn override_dir_replaces_the_bundled_catalog() {
+    let dir = temp_dir("override");
+    std::fs::create_dir_all(dir.join("mine")).unwrap();
+    std::fs::write(
+        dir.join("mine/SKILL.md"),
+        "---\nname: mine\ndescription: Mine.\n---\nbody\n",
+    )
+    .unwrap();
+    let out = ado_cli()
+        .env("ADO_CLI_SKILLS_DIR", &dir)
+        .args(["skills", "path", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["location"], serde_json::json!("directory"));
+    assert_eq!(v["available"], serde_json::json!(["mine"]));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn override_dir_serves_its_own_skills() {
+    let dir = temp_dir("serve");
+    std::fs::create_dir_all(dir.join("mine")).unwrap();
+    std::fs::write(
+        dir.join("mine/SKILL.md"),
+        "---\nname: mine\ndescription: Mine.\n---\nbody\n",
+    )
+    .unwrap();
+    let out = ado_cli()
+        .env("ADO_CLI_SKILLS_DIR", &dir)
+        .args(["skills", "get", "mine", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["name"], serde_json::json!("mine"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn empty_override_is_treated_as_unset() {
+    let out = ado_cli()
+        .env("ADO_CLI_SKILLS_DIR", "")
+        .args(["skills", "path", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["location"], serde_json::json!("embedded"));
+}
+
+#[test]
+fn missing_override_dir_is_an_io_error() {
+    let out = ado_cli()
+        .env("ADO_CLI_SKILLS_DIR", "/definitely/not/here")
+        .args(["skills", "path", "--json"])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(v["reason"], serde_json::json!("io_error"));
+}
+
+#[test]
+fn malformed_override_skill_fails_the_whole_catalog() {
+    let dir = temp_dir("malformed");
+    std::fs::create_dir_all(dir.join("mine")).unwrap();
+    std::fs::write(dir.join("mine/SKILL.md"), "no frontmatter here\n").unwrap();
+    let out = ado_cli()
+        .env("ADO_CLI_SKILLS_DIR", &dir)
+        .args(["skills", "list", "--json"])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(v["reason"], serde_json::json!("validation_failed"));
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
+fn override_path_is_reported_as_absolute() {
+    let dir = temp_dir("absolute");
+    std::fs::create_dir_all(dir.join("mine")).unwrap();
+    std::fs::write(
+        dir.join("mine/SKILL.md"),
+        "---\nname: mine\ndescription: Mine.\n---\nbody\n",
+    )
+    .unwrap();
+    let out = ado_cli()
+        .env("ADO_CLI_SKILLS_DIR", &dir)
+        .args(["skills", "path", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    let path = v["path"].as_str().unwrap();
+    assert!(path.starts_with('/'), "path must be absolute: {path}");
+    std::fs::remove_dir_all(&dir).ok();
+}
+
 /// A temp directory, created fresh. No `tempfile` dependency exists in this
 /// crate, so this follows the `tests/login_cli.rs` pattern.
-#[allow(dead_code)]
 fn temp_dir(tag: &str) -> PathBuf {
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0);
