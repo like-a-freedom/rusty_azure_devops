@@ -60,7 +60,7 @@ impl SkillSource for DirectorySource {
 ///
 /// An operating system must not add content to a skill: a stray `.DS_Store`
 /// would otherwise be embedded and served as part of a skill.
-pub(crate) fn is_hidden(path: &str) -> bool {
+pub(crate) fn is_hidden_segment(path: &str) -> bool {
     path.split('/').any(|segment| segment.starts_with('.'))
 }
 
@@ -80,7 +80,7 @@ fn collect_embedded(dir: &include_dir::Dir<'_>, prefix: &str, out: &mut Vec<(Str
         match entry {
             include_dir::DirEntry::Dir(sub) => collect_embedded(sub, &relative, out),
             include_dir::DirEntry::File(file) => {
-                if !is_hidden(&relative) {
+                if !is_hidden_segment(&relative) {
                     out.push((relative, file.contents().to_vec()));
                 }
             }
@@ -106,7 +106,7 @@ fn collect_dir(
             .strip_prefix(root)
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .unwrap_or_default();
-        if is_hidden(&relative) {
+        if is_hidden_segment(&relative) {
             continue;
         }
         if path.is_dir() {
@@ -211,5 +211,73 @@ mod tests {
             !paths.iter().any(|p| p.contains(".DS_Store")),
             "dotfiles must not be embedded: {paths:?}"
         );
+    }
+
+    #[test]
+    fn both_sources_return_the_same_paths_on_repeated_calls() {
+        let embedded = EmbeddedSource.files().unwrap();
+        let embedded_again = EmbeddedSource.files().unwrap();
+        assert_eq!(
+            embedded, embedded_again,
+            "the embedded source must be deterministic"
+        );
+
+        let dir = temp_dir("determinism");
+        write(&dir, "core/SKILL.md", "body");
+        write(&dir, "core/references/commands.md", "cmds");
+        write(&dir, "on-prem/SKILL.md", "body");
+        let source = DirectorySource::new(dir.clone()).unwrap();
+        let first = source.files().unwrap();
+        let second = source.files().unwrap();
+        assert_eq!(first, second, "the directory source must be deterministic");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn both_sources_return_paths_sorted_by_path() {
+        let embedded: Vec<String> = EmbeddedSource
+            .files()
+            .unwrap()
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect();
+        let mut sorted = embedded.clone();
+        sorted.sort();
+        assert_eq!(embedded, sorted, "embedded paths must be sorted");
+
+        let dir = temp_dir("sorted");
+        write(&dir, "core/SKILL.md", "body");
+        write(&dir, "core/references/commands.md", "cmds");
+        write(&dir, "on-prem/SKILL.md", "body");
+        let source = DirectorySource::new(dir.clone()).unwrap();
+        let paths: Vec<String> = source
+            .files()
+            .unwrap()
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect();
+        let mut sorted = paths.clone();
+        sorted.sort();
+        assert_eq!(paths, sorted, "directory paths must be sorted");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_embedded_source_emits_slash_separators_only() {
+        for (path, _) in EmbeddedSource.files().unwrap() {
+            assert!(
+                !path.contains('\\'),
+                "embedded path must use / separators: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn hidden_paths_are_recognised_by_any_segment() {
+        assert!(is_hidden_segment(".DS_Store"));
+        assert!(is_hidden_segment("core/.DS_Store"));
+        assert!(is_hidden_segment("core/references/.hidden"));
+        assert!(!is_hidden_segment("core/SKILL.md"));
+        assert!(!is_hidden_segment("core/references/commands.md"));
     }
 }
