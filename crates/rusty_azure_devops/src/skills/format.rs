@@ -164,6 +164,7 @@ pub fn catalog_location_human(location: &CatalogLocation, available: &[String]) 
     };
     out.push('\n');
     out.push_str(&format!("available: {}", available.join(", ")));
+    out.push('\n');
     out
 }
 
@@ -242,6 +243,16 @@ mod tests {
         assert!(out.contains("core"), "{out}");
         assert!(out.contains("Core usage."), "{out}");
         assert!(out.contains("references/commands.md"), "{out}");
+    }
+
+    #[test]
+    fn location_human_ends_with_a_newline() {
+        let names = vec!["core".to_string()];
+        let out = catalog_location_human(&CatalogLocation::Embedded, &names);
+        assert!(
+            out.ends_with('\n'),
+            "output must end with a newline: {out:?}"
+        );
     }
 
     #[test]
