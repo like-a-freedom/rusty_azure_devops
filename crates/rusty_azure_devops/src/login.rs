@@ -66,6 +66,39 @@ impl CommandError {
     }
 }
 
+/// Map a skills-domain error onto the CLI error envelope.
+///
+/// Lives here, beside `CommandError`, so the mapping is unit-testable in
+/// the library. The dependency runs inward: `skills/mod.rs` never names
+/// `CommandError`.
+impl From<crate::skills::SkillsError> for CommandError {
+    fn from(err: crate::skills::SkillsError) -> Self {
+        use crate::skills::SkillsError;
+        match err {
+            SkillsError::SkillNotFound { name } => CommandError::new(
+                "skill_not_found",
+                format!("no skill named '{name}'"),
+                "ado-cli skills list".to_string(),
+            ),
+            SkillsError::ReferenceNotFound { skill, path } => CommandError::new(
+                "reference_not_found",
+                format!("'{path}' is not a file of skill '{skill}'"),
+                format!("ado-cli skills get {skill} --full"),
+            ),
+            SkillsError::Invalid { name, detail } => CommandError::new(
+                "validation_failed",
+                format!("skill '{name}' is unusable: {detail}"),
+                "ado-cli skills list".to_string(),
+            ),
+            SkillsError::Io { detail } => CommandError::new(
+                "io_error",
+                detail,
+                "check the ADO_CLI_SKILLS_DIR override, or unset it".to_string(),
+            ),
+        }
+    }
+}
+
 /// Pure merge: explicit flags win over env values. Takes env values as
 /// parameters (caller reads env) so this stays side-effect free.
 pub fn resolve_credentials(
@@ -347,6 +380,49 @@ pub fn run_logout() -> Result<LogoutResult, CommandError> {
 #[cfg(test)]
 mod tests {
     use crate::login::{CommandError, required, resolve_credentials};
+
+    #[test]
+    fn skills_errors_map_to_stable_reason_tokens_and_exit_codes() {
+        use crate::skills::SkillsError;
+
+        let cases: Vec<(SkillsError, &str, i32)> = vec![
+            (
+                SkillsError::SkillNotFound { name: "x".into() },
+                "skill_not_found",
+                1,
+            ),
+            (
+                SkillsError::ReferenceNotFound {
+                    skill: "core".into(),
+                    path: "p.md".into(),
+                },
+                "reference_not_found",
+                1,
+            ),
+            (
+                SkillsError::Invalid {
+                    name: "x".into(),
+                    detail: "bad".into(),
+                },
+                "validation_failed",
+                1,
+            ),
+            (
+                SkillsError::Io {
+                    detail: "io".into(),
+                },
+                "io_error",
+                1,
+            ),
+        ];
+
+        for (err, reason, exit) in cases {
+            let cmd: CommandError = err.into();
+            assert_eq!(cmd.reason, reason);
+            assert_eq!(cmd.exit_code, exit);
+            assert!(!cmd.hint.is_empty(), "every error carries a hint");
+        }
+    }
 
     #[test]
     fn resolve_credentials_prefers_flags_over_env() {
