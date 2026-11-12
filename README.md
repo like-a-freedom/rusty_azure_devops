@@ -43,6 +43,26 @@ Both call the same operations — `WorkItemOperations` and `ProjectLookup` are t
 
 ---
 
+## Agent skills
+
+The CLI ships usage guides for AI agents, version-matched to the binary:
+
+```sh
+ado-cli skills list            # available skills
+ado-cli skills get core        # print a skill
+ado-cli skills get core --full # with its reference files
+ado-cli skills path            # where the catalog came from
+```
+
+Skills are embedded in the binary, so they always match the installed
+version — no token, no network, no install step. The `core` skill covers the
+workflow and the command surface; the `on-prem` skill covers Azure DevOps
+Server (TFS) quirks.
+
+See `ado-cli skills --help`.
+
+---
+
 ## Configuration
 
 ### First run (recommended)

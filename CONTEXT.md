@@ -55,6 +55,38 @@ The user-level `~/.config/rusty_azure_devops/config.yaml` written by `login` (mo
 shadow it — both commands report that via `shadow_warning`.
 _Avoid_: global config, settings.json
 
+**Skill**:
+An agent-facing usage guide served by `ado-cli skills` — a `SKILL.md` with YAML
+frontmatter (`name`, `description`) plus optional `references/` files, embedded in
+the binary and rebuilt with the CLI it describes. Its directory name is its
+addressing key and must equal its frontmatter `name`.
+_Avoid_: doc, guide, manual, playbook
+
+**Skill File**:
+A supporting file inside a Skill, addressed by its exact path relative to the
+skill root using `/` separators. `SKILL.md` is not a Skill File. The file set
+is matched exactly — no file-name or stem fallback — so a lookup is never
+ambiguous.
+_Avoid_: reference file, attachment, asset
+
+**Skill Catalog**:
+The set of Skills the CLI serves, assembled from one location and sorted by
+name. The whole Catalog fails if any Skill is unusable: there is no
+partially-served Catalog.
+_Avoid_: registry, index, manifest
+
+**Catalog Location**:
+Where a Skill Catalog came from — `Embedded` (compiled into the binary) or
+`Directory` (a path on disk). `ADO_CLI_SKILLS_DIR` selects the latter and
+replaces the bundled Catalog entirely.
+_Avoid_: source, origin, provider
+
+**Skills Error**:
+The domain error raised by the skills module — `SkillNotFound`,
+`ReferenceNotFound`, `Invalid`, `Io`. The CLI maps each variant onto a stable
+`reason` token; the domain never names a reason token or an exit code.
+_Avoid_: skill failure, skill error, catalog error
+
 ## Test doubles
 
 **InMemoryAzureClient**:

@@ -10,7 +10,7 @@ crates/
   azure_devops_client/     # Library crate: AzureDevOpsClient trait, SDK adapter, resilience
   rusty_azure_devops/      # Binary crate: MCP server (rmcp), CLI, operations, domain
 docs/
-  adr/                     # Architecture Decision Records (0001–0015)
+  adr/                     # Architecture Decision Records (0001–0017)
   SPEC.md                  # Software Requirements Specification
   schemas/                 # JSON schemas for tool contracts
 CONTEXT.md                 # Domain glossary (WorkItem, AzureError, Tool, etc.)
@@ -42,10 +42,18 @@ See `CONTEXT.md` for canonical terms. Key ones:
 
 ### Known On-Prem TFS Limitations
 
-- `$expand` and `fields` params cannot be used together — client drops `fields` when expand is set
-- `expand=Comments` not supported on on-prem — comments fetched separately via comments API
-- Comments API requires `api-version=6.0-preview` (not `6.0`), bypassed via `OnPremFallback::get_with_api_version`
-- SDK's `DowngradeApiVersionPolicy` rewrites `7.1-preview` → target version; does not handle comments API version
+Published as an agent skill that ships with the binary, so it always matches
+the installed CLI:
+
+```sh
+ado-cli skills get on-prem
+```
+
+The skill carries the full quirk matrix — the `$expand`/`fields` conflict,
+`expand=Comments` being unsupported, the comments API version, the
+`System.History` fallback, and the API-version downgrade policy. Keep that
+skill as the single source of truth and change it here only when the skill
+changes.
 
 ### Key Files
 
@@ -64,11 +72,13 @@ See `CONTEXT.md` for canonical terms. Key ones:
 | `crates/rusty_azure_devops/src/operations/helpers.rs` | Shared micro-helpers (normalize_description_to_markdown, etc.) |
 | `crates/rusty_azure_devops/src/domain/conversions.rs` | Patch Document construction (ADR-0006) |
 | `crates/rusty_azure_devops/src/bin/cli.rs` | CLI binary (Command enum, human-readable + JSON output) |
-| `crates/rusty_azure_devops/tests/schema_validation.rs` | Parity test: `Tool ⊇ CliCommand` |
+| `crates/rusty_azure_devops/tests/schema_validation.rs` | Parity test: `Tool ⊇ CliCommand`; drift guard: skill command map = CLI command list |
+| `crates/rusty_azure_devops/src/skills/` | Agent skills module: domain model, content sources, rendering |
+| `crates/rusty_azure_devops/skills/` | The shipped skill content (`core`, `on-prem`), embedded at build time |
 
 ### ADRs
 
-Implemented and accepted: 0001 (superseded), 0002–0011. Proposed: 0012–0015. See `docs/adr/`.
+Implemented and accepted: 0001 (superseded), 0002–0011. Proposed: 0012–0017. See `docs/adr/`.
 
 | ADR | Title | Status |
 |---|---|---|
@@ -86,6 +96,8 @@ Implemented and accepted: 0001 (superseded), 0002–0011. Proposed: 0012–0015.
 | 0013 | Slim InMemory client to test double | proposed |
 | 0014 | Extract orchestration from create_work_item | proposed |
 | 0015 | Declarative module registry | proposed |
+| 0016 | `ado-cli login` as primary auth UX | proposed |
+| 0017 | Built-in agent skills | proposed |
 
 # Development Guidelines
 

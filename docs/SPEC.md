@@ -102,6 +102,11 @@ FR-8: Primary authorization (login)
 - Implementation: `ado-cli login [--base-url --token|--token-stdin --organization --project --api-version --ca-cert --force --no-verify --json]`, `ado-cli logout [--json]`.
 - Acceptance: without a TTY and without flags or env values, the command exits quickly with `missing_value` (exit code 1) instead of blocking on input; overwriting an existing config requires `--force` (otherwise `confirmation_required`, exit code 3); with `--json`, errors go to stderr as `{"ok":false,"reason","detail","hint"}` and stdout stays empty; the token is never printed in any mode.
 
+FR-9: Built-in agent skills
+- Description: `ado-cli skills` serves agent-facing usage guides embedded in the binary, so they always match the installed CLI version. Subcommands: `list`, `get <name> [--full] [--ref <path>]`, `path`. CLI-only — no MCP tool (ADR-0017), like `login`/`logout`.
+- Implementation: skill files live in `crates/rusty_azure_devops/skills/<name>/SKILL.md` with optional `references/`, embedded at compile time via `include_dir!`. `ADO_CLI_SKILLS_DIR` replaces the bundled catalog for local iteration; an empty value is treated as unset, and a missing directory is an error rather than a silent fallback. The command is dispatched before credential loading.
+- Acceptance: `ado-cli skills get core` prints the skill markdown byte-exactly and works with no `ADO_TOKEN`, no config file, and no network; `ado-cli skills list --json` returns `{"ok":true,"skills":[…]}`; runtime errors go to stderr as `{"ok":false,"reason","detail","hint"}` with stable reasons `skill_not_found`, `reference_not_found`, `validation_failed`, `io_error` and exit code 1, stdout empty on failure; clap usage errors remain plain text with exit code 2 even under `--json`; a test guards that the skill documents every CLI command and no other.
+
 ## 5. Non-functional requirements (NFR)
 
 NFR-1: Performance
