@@ -2,10 +2,10 @@ use clap::{Parser, Subcommand};
 use serde_json::{Value, json};
 
 use rusty_azure_devops::{
-    LoginParams, build_create_work_item_params, config::Config, create_modules, domain::*,
-    format_add_comment_result, format_comments, format_create_result, format_link_result,
-    format_list_projects, format_query_results, format_search, format_status, format_work_item,
-    parse_work_item_id, run_login, run_logout,
+    CommandError, LoginParams, build_create_work_item_params, config::Config, create_modules,
+    domain::*, format_add_comment_result, format_comments, format_create_result,
+    format_link_result, format_list_projects, format_query_results, format_search, format_status,
+    format_work_item, parse_work_item_id, run_login, run_logout,
 };
 
 fn parse_key_value(s: &str) -> Result<(String, Value), String> {
@@ -315,6 +315,164 @@ enum Command {
         #[arg(long)]
         limit: Option<usize>,
     },
+
+    #[doc = "Built-in agent skills: usage guides for driving this CLI.\nServed by the binary itself, so they always match the installed version.\n\nExamples:\n  ado-cli skills list\n  ado-cli skills get core\n  ado-cli skills get core --full\n  ado-cli skills path"]
+    Skills {
+        #[command(subcommand)]
+        command: Option<SkillsCommand>,
+    },
+}
+
+/// The `skills` subcommands.
+#[derive(Subcommand)]
+enum SkillsCommand {
+    #[doc = "List built-in skills."]
+    List,
+
+    #[doc = "Print a skill's markdown."]
+    Get {
+        /// Skill name (e.g. 'core').
+        name: String,
+
+        /// Also print the skill's supporting files.
+        #[arg(long, conflicts_with = "reference")]
+        full: bool,
+
+        /// Print one supporting file by its exact path (e.g. 'references/commands.md').
+        #[arg(long = "ref", value_name = "PATH")]
+        reference: Option<String>,
+    },
+
+    #[doc = "Show where the skill catalog came from."]
+    Path,
+}
+
+/// Route the commands that run before any credential check.
+///
+/// `login`/`logout` have no config yet on first run; `skills` reads no
+/// server and no token at all — it serves content compiled into the binary.
+async fn dispatch_before_credentials(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    match cli.command {
+        Command::Login { .. } | Command::Logout {} => dispatch_auth(cli).await,
+        Command::Skills { .. } => dispatch_skills(cli),
+        // The guard in `main` only routes these three here.
+        _ => unreachable!("dispatch_before_credentials called for another command"),
+    }
+}
+
+/// Serve the built-in agent skills.
+///
+/// The catalog is content compiled into this binary; `skills` never touches
+/// the network, `ADO_TOKEN`, or `config.yaml`.
+fn dispatch_skills(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    let json = cli.json;
+    let command = match cli.command {
+        Command::Skills { command } => command,
+        _ => unreachable!("dispatch_skills called for a non-skills command"),
+    };
+
+    let catalog = match rusty_azure_devops::skills::catalog() {
+        Ok(catalog) => catalog,
+        Err(e) => {
+            CommandError::from(e).report(json);
+        }
+    };
+
+    match command {
+        None | Some(SkillsCommand::List) => {
+            if json {
+                println!(
+                    "{}",
+                    rusty_azure_devops::skills::format::skill_list_json(&catalog)
+                );
+            } else {
+                print!(
+                    "{}",
+                    rusty_azure_devops::skills::format::skill_list_human(&catalog)
+                );
+            }
+        }
+        Some(SkillsCommand::Get {
+            name,
+            full,
+            reference,
+        }) => {
+            let skill = match catalog.get(&name) {
+                Ok(skill) => skill,
+                Err(e) => {
+                    CommandError::from(e).report(json);
+                }
+            };
+            if let Some(path) = reference {
+                let file = match skill.file(&path) {
+                    Ok(file) => file,
+                    Err(e) => {
+                        CommandError::from(e).report(json);
+                    }
+                };
+                if json {
+                    println!(
+                        "{}",
+                        serde_json::json!({
+                            "ok": true,
+                            "name": skill.name,
+                            "path": file.path,
+                            "content": file.content,
+                        })
+                    );
+                } else {
+                    print!(
+                        "{}",
+                        rusty_azure_devops::skills::format::skill_file_human(skill, file)
+                    );
+                }
+            } else if full {
+                if json {
+                    println!(
+                        "{}",
+                        rusty_azure_devops::skills::format::skill_detail_json(skill)
+                    );
+                } else {
+                    print!(
+                        "{}",
+                        rusty_azure_devops::skills::format::skill_full_human(skill)
+                    );
+                }
+            } else if json {
+                println!(
+                    "{}",
+                    rusty_azure_devops::skills::format::skill_detail_json(skill)
+                );
+            } else {
+                print!(
+                    "{}",
+                    rusty_azure_devops::skills::format::skill_detail_human(skill)
+                );
+            }
+        }
+        Some(SkillsCommand::Path) => {
+            let available: Vec<String> = catalog.skills.iter().map(|s| s.name.clone()).collect();
+            if json {
+                println!(
+                    "{}",
+                    rusty_azure_devops::skills::format::catalog_location_json(
+                        &catalog.location,
+                        &available
+                    )
+                );
+            } else {
+                print!(
+                    "{}",
+                    rusty_azure_devops::skills::format::catalog_location_human(
+                        &catalog.location,
+                        &available
+                    )
+                );
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Auth dispatch: `login`/`logout` run before any credential check, because on
@@ -405,9 +563,13 @@ async fn dispatch_auth(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
 
-    // `login`/`logout` must run before credential loading (first-run path).
-    if matches!(cli.command, Command::Login { .. } | Command::Logout {}) {
-        return dispatch_auth(cli).await;
+    // `login`/`logout`/`skills` must run before credential loading: the first
+    // two have no config yet, and `skills` reads no server and no token.
+    if matches!(
+        cli.command,
+        Command::Login { .. } | Command::Logout {} | Command::Skills { .. }
+    ) {
+        return dispatch_before_credentials(cli).await;
     }
 
     let config = Config::load_with_overrides(cli.token.as_deref(), cli.base_url.as_deref())?;
@@ -419,10 +581,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let queries = modules.queries;
 
     match cli.command {
-        // Auth commands are dispatched before credential loading (see the guard
-        // at the top of main): reaching them here means the guard was bypassed.
+        // Auth and skills commands are dispatched before credential loading
+        // (see the guard at the top of main): reaching them here means the
+        // guard was bypassed.
         Command::Login { .. } | Command::Logout {} => {
             unreachable!("auth commands are dispatched before credential loading")
+        }
+        Command::Skills { .. } => {
+            unreachable!("skills is dispatched before credential loading")
         }
         Command::Status {
             show_secrets,
