@@ -119,6 +119,37 @@ fn skills_bare_runs_the_list() {
     assert!(text.contains("core"), "{text}");
 }
 
+#[test]
+fn root_help_mentions_skills() {
+    ado_cli()
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("skills"))
+        .stdout(predicate::str::contains("Agent skills:"));
+}
+
+#[test]
+fn skills_help_lists_subcommands() {
+    ado_cli()
+        .args(["skills", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("list"))
+        .stdout(predicate::str::contains("get"))
+        .stdout(predicate::str::contains("path"));
+}
+
+#[test]
+fn skills_get_help_documents_flags() {
+    ado_cli()
+        .args(["skills", "get", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("--full"))
+        .stdout(predicate::str::contains("--ref"));
+}
+
 /// A temp directory, created fresh. No `tempfile` dependency exists in this
 /// crate, so this follows the `tests/login_cli.rs` pattern.
 #[allow(dead_code)]

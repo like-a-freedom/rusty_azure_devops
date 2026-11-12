@@ -55,7 +55,12 @@ fn parse_relation(s: &str) -> Result<RelationDto, String> {
 /// comment operations. All commands accept --json for machine-readable output.
 /// Credentials: ado-cli login (recommended), --token flag, ADO_TOKEN env var, or config.yaml. See status.
 #[derive(Parser)]
-#[command(name = "ado-cli", version, about = "Azure DevOps CLI client")]
+#[command(
+    name = "ado-cli",
+    version,
+    about = "Azure DevOps CLI client",
+    after_help = "Agent skills: run 'ado-cli skills list' to see built-in usage guides."
+)]
 struct Cli {
     /// Personal Access Token. Overrides ADO_TOKEN env var and config.yaml.
     /// Ali: set ADO_TOKEN env var to avoid passing --token every time.
