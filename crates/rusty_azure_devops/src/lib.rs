@@ -4,6 +4,7 @@ pub mod config;
 pub mod domain;
 pub mod login;
 pub mod operations;
+pub mod skills;
 pub mod tools;
 
 #[cfg(test)]
