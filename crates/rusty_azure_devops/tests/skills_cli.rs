@@ -150,6 +150,52 @@ fn skills_get_help_documents_flags() {
         .stdout(predicate::str::contains("--ref"));
 }
 
+#[test]
+fn unknown_skill_is_reported_as_json_on_stderr() {
+    let out = ado_cli()
+        .args(["skills", "get", "nope", "--json"])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    assert!(out.stdout.is_empty(), "stdout must stay empty on failure");
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(v["ok"], serde_json::json!(false));
+    assert_eq!(v["reason"], serde_json::json!("skill_not_found"));
+    assert!(v["hint"].as_str().unwrap().contains("skills list"));
+}
+
+#[test]
+fn unknown_skill_without_json_is_prose_on_stderr() {
+    ado_cli()
+        .args(["skills", "get", "nope"])
+        .assert()
+        .failure()
+        .stdout(predicate::str::is_empty())
+        .stderr(predicate::str::contains("Error:"))
+        .stderr(predicate::str::contains("Hint:"));
+}
+
+#[test]
+fn unknown_reference_is_reported_as_json_on_stderr() {
+    let out = ado_cli()
+        .args(["skills", "get", "core", "--ref", "nope.md", "--json"])
+        .assert()
+        .failure()
+        .get_output()
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out.stderr).unwrap();
+    assert_eq!(v["reason"], serde_json::json!("reference_not_found"));
+}
+
+#[test]
+fn full_and_ref_together_is_a_usage_error() {
+    ado_cli()
+        .args(["skills", "get", "core", "--full", "--ref", "x.md"])
+        .assert()
+        .code(2);
+}
+
 /// A temp directory, created fresh. No `tempfile` dependency exists in this
 /// crate, so this follows the `tests/login_cli.rs` pattern.
 #[allow(dead_code)]
