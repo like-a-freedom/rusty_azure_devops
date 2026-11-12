@@ -132,30 +132,37 @@ fn validate_all_tool_schemas() {
 /// CLI `Command` is private to the binary, so we assert against the known
 /// list of CLI subcommand names. If a new CLI command is added without a
 /// corresponding `Tool`, this test will fail.
+///
+/// (CLI subcommand name, expected Tool variant).
+/// Keep this list in sync with the `Command` enum in bin/cli.rs.
+/// login/logout/skills are CLI-only (like `gcx login`, `pangolin
+/// login/logout`, `keenable login/logout`) and intentionally absent here:
+/// local secret ops and the bundled skill catalog must not become MCP
+/// tools.
+const CLI_TO_TOOL: &[(&str, &str)] = &[
+    ("status", "get_status"),
+    ("list-projects", "list_projects"),
+    ("get-work-item", "get_work_item"),
+    ("create-work-item", "create_work_item"),
+    ("update-work-item", "update_work_item"),
+    ("manage-link", "manage_work_item_link"),
+    ("search", "search_work_items"),
+    ("comments", "get_workitem_comments"),
+    ("add-comment", "add_comment"),
+    ("get-query-results", "get_query_results"),
+];
+
+/// CLI-only commands with no MCP tool mirror. If a Tool variant ever
+/// appears for one of these, this fails loudly: local secret ops and the
+/// bundled skill catalog must stay out of the MCP surface.
+const CLI_ONLY: &[&str] = &["login", "logout", "skills"];
+
 #[test]
 fn tool_enum_covers_all_cli_commands() {
     use rusty_azure_devops::tools::Tool;
 
-    // (CLI subcommand name, expected Tool variant).
-    // Keep this list in sync with the `Command` enum in bin/cli.rs.
-    // login/logout are CLI-only auth UX (like `gcx login`, `pangolin
-    // login/logout`, `keenable login/logout`) and intentionally absent here:
-    // local secret ops must not become MCP tools.
-    let cli_to_tool: &[(&str, &str)] = &[
-        ("status", "get_status"),
-        ("list-projects", "list_projects"),
-        ("get-work-item", "get_work_item"),
-        ("create-work-item", "create_work_item"),
-        ("update-work-item", "update_work_item"),
-        ("manage-link", "manage_work_item_link"),
-        ("search", "search_work_items"),
-        ("comments", "get_workitem_comments"),
-        ("add-comment", "add_comment"),
-        ("get-query-results", "get_query_results"),
-    ];
-
     let tool_names: Vec<&str> = Tool::ALL.iter().map(|t| t.as_str()).collect();
-    for (cli_cmd, expected_tool) in cli_to_tool {
+    for (cli_cmd, expected_tool) in CLI_TO_TOOL {
         assert!(
             tool_names.contains(expected_tool),
             "CLI command '{}' expects tool '{}' which does not exist in Tool enum. Available: {:?}",
@@ -165,16 +172,79 @@ fn tool_enum_covers_all_cli_commands() {
         );
     }
 
-    /// CLI-only commands with no MCP tool mirror. If a Tool variant ever
-    /// appears for one of these, this fails loudly: local secret ops must
-    /// stay out of the MCP surface.
-    const CLI_ONLY: &[&str] = &["login", "logout"];
-
     for cli_cmd in CLI_ONLY {
         assert!(
             !tool_names.contains(cli_cmd),
             "CLI-only '{}' must not gain an MCP tool (local secret op)",
             cli_cmd,
+        );
+    }
+}
+
+/// Extract command names from the skill reference.
+///
+/// A command counts as documented only when a line, after leading
+/// whitespace is stripped, begins with `ado-cli `. The anchor is what makes
+/// the rule work: an unanchored scan would match ordinary prose.
+fn documented_commands(reference: &str) -> Vec<String> {
+    let mut names: Vec<String> = reference
+        .lines()
+        .map(str::trim_start)
+        .filter_map(|line| line.strip_prefix("ado-cli "))
+        .filter_map(|rest| rest.split_whitespace().next())
+        .filter(|word| {
+            !word.is_empty()
+                && word.starts_with(|c: char| c.is_ascii_lowercase())
+                && word
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        })
+        .map(str::to_string)
+        .collect();
+    names.sort();
+    names.dedup();
+    names
+}
+
+#[test]
+fn skill_documents_every_cli_command_and_no_other() {
+    let catalog = rusty_azure_devops::skills::embedded_catalog().expect("embedded catalog");
+    let core = catalog.get("core").expect("core skill");
+    let reference = core
+        .files
+        .iter()
+        .find(|f| f.path == "references/commands.md")
+        .expect("commands.md is a core reference")
+        .content
+        .clone();
+
+    let documented = documented_commands(&reference);
+
+    let mut expected: Vec<String> = CLI_TO_TOOL
+        .iter()
+        .map(|(cli, _)| (*cli).to_string())
+        .collect();
+    expected.extend(CLI_ONLY.iter().map(|s| (*s).to_string()));
+    expected.sort();
+    expected.dedup();
+
+    for name in &expected {
+        assert!(
+            documented.contains(name),
+            "the skill must document `ado-cli {name}`; documented: {documented:?}"
+        );
+    }
+
+    // clap synthesizes `help`; it is a real command but not one of ours.
+    let allowed: Vec<String> = expected
+        .iter()
+        .cloned()
+        .chain(["help".to_string()])
+        .collect();
+    for name in &documented {
+        assert!(
+            allowed.contains(name),
+            "the skill documents `ado-cli {name}`, which is not a CLI command"
         );
     }
 }
