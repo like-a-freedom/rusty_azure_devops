@@ -7,6 +7,7 @@
 //!
 //! See docs/adr/0017-cli-agent-skills.md.
 
+pub mod format;
 pub mod source;
 
 use std::path::PathBuf;
