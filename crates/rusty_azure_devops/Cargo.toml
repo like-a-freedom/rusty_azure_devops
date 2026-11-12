@@ -39,6 +39,7 @@ pulldown-cmark = { version = "0.13", default-features = false, features = ["html
 rpassword = "7"
 clap = { version = "4", features = ["derive"] }
 serde_yaml = "0.9"
+include_dir = "0.7.4"
 url = "2.5.8"
 
 

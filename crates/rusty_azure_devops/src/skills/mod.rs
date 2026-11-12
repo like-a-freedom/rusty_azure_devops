@@ -7,7 +7,11 @@
 //!
 //! See docs/adr/0017-cli-agent-skills.md.
 
+pub mod source;
+
 use std::path::PathBuf;
+
+use source::{DirectorySource, EmbeddedSource, SkillSource};
 
 /// One agent-facing usage guide: a `SKILL.md` plus its supporting files.
 #[derive(Debug, Clone)]
@@ -143,9 +147,124 @@ pub fn parse_frontmatter(content: &str) -> Result<(String, String), String> {
     Ok((name, description))
 }
 
+/// The catalog the CLI serves: the embedded skills, unless
+/// `ADO_CLI_SKILLS_DIR` replaces them.
+///
+/// An exported-but-empty variable is treated as unset, so a shell profile
+/// that leaves `ADO_CLI_SKILLS_DIR=` empty does not break the CLI.
+pub fn catalog() -> Result<SkillCatalog, SkillsError> {
+    match std::env::var("ADO_CLI_SKILLS_DIR") {
+        Ok(dir) if !dir.trim().is_empty() => {
+            let source = DirectorySource::new(PathBuf::from(dir)).map_err(|e| match e {
+                SkillsError::Io { detail } => SkillsError::Io {
+                    detail: format!("ADO_CLI_SKILLS_DIR: {detail}"),
+                },
+                other => other,
+            })?;
+            let location = CatalogLocation::Directory(source.root.clone());
+            build_catalog(&source, location)
+        }
+        _ => embedded_catalog(),
+    }
+}
+
+/// The catalog compiled into this binary, ignoring `ADO_CLI_SKILLS_DIR`.
+pub fn embedded_catalog() -> Result<SkillCatalog, SkillsError> {
+    build_catalog(&EmbeddedSource, CatalogLocation::Embedded)
+}
+
+/// Assemble a catalog from a source.
+///
+/// Files are grouped by their first path segment — the skill directory
+/// name. `SKILL.md` is the skill's content; every other file is a supporting
+/// file, addressed relative to the skill root.
+///
+/// The whole catalog fails on the first unusable skill: there is no
+/// partially-served catalog and no separate list of broken skills.
+pub(crate) fn build_catalog(
+    source: &dyn SkillSource,
+    location: CatalogLocation,
+) -> Result<SkillCatalog, SkillsError> {
+    let files = source.files()?;
+
+    let mut by_skill: std::collections::BTreeMap<String, Vec<(String, Vec<u8>)>> =
+        std::collections::BTreeMap::new();
+    for (path, bytes) in files {
+        let Some((skill, rest)) = path.split_once('/') else {
+            // A file at the source root is not inside a skill directory.
+            continue;
+        };
+        by_skill
+            .entry(skill.to_string())
+            .or_default()
+            .push((rest.to_string(), bytes));
+    }
+
+    let mut skills = Vec::with_capacity(by_skill.len());
+    for (name, entries) in by_skill {
+        let skill_md = entries
+            .iter()
+            .find(|(path, _)| path == "SKILL.md")
+            .map(|(_, bytes)| String::from_utf8_lossy(bytes).into_owned())
+            .ok_or_else(|| SkillsError::Invalid {
+                name: name.clone(),
+                detail: "no SKILL.md".to_string(),
+            })?;
+
+        let (frontmatter_name, description) =
+            parse_frontmatter(&skill_md).map_err(|detail| SkillsError::Invalid {
+                name: name.clone(),
+                detail,
+            })?;
+        if frontmatter_name != name {
+            return Err(SkillsError::Invalid {
+                name: name.clone(),
+                detail: format!(
+                    "frontmatter name '{frontmatter_name}' does not match directory '{name}'"
+                ),
+            });
+        }
+
+        let mut files: Vec<SkillFile> = entries
+            .into_iter()
+            .filter(|(path, _)| path != "SKILL.md")
+            .map(|(path, bytes)| SkillFile {
+                path,
+                content: String::from_utf8_lossy(&bytes).into_owned(),
+            })
+            .collect();
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+
+        skills.push(Skill {
+            name,
+            description,
+            content: skill_md,
+            files,
+        });
+    }
+
+    Ok(SkillCatalog { skills, location })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// A temp directory, created fresh. No `tempfile` dependency exists in
+    /// this crate, so this follows the `tests/login_cli.rs` pattern.
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ado-skills-{tag}-{}-{}",
+            std::process::id(),
+            COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     const GOOD: &str = "---\nname: core\ndescription: Core usage.\n---\n\n# Core\n\nbody\n";
 
@@ -217,5 +336,79 @@ mod tests {
             matches!(err, SkillsError::SkillNotFound { ref name } if name == "nope"),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn embedded_catalog_yields_both_bundled_skills() {
+        let catalog = embedded_catalog().expect("embedded catalog assembles");
+        let names: Vec<&str> = catalog.skills.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, ["core", "on-prem"]);
+        assert!(matches!(catalog.location, CatalogLocation::Embedded));
+    }
+
+    #[test]
+    fn embedded_catalog_exposes_reference_files_relative_to_the_skill_root() {
+        let catalog = embedded_catalog().expect("embedded catalog assembles");
+        let core = catalog.get("core").unwrap();
+        let paths: Vec<&str> = core.files.iter().map(|f| f.path.as_str()).collect();
+        assert!(
+            paths.contains(&"references/commands.md"),
+            "paths are relative to the skill root: {paths:?}"
+        );
+    }
+
+    #[test]
+    fn catalog_fails_when_a_skill_frontmatter_is_unusable() {
+        let dir = temp_dir("invalid");
+        std::fs::create_dir_all(dir.join("mine")).unwrap();
+        std::fs::write(dir.join("mine/SKILL.md"), "no frontmatter here\n").unwrap();
+        let source = DirectorySource::new(dir.clone()).unwrap();
+        let err = build_catalog(&source, CatalogLocation::Embedded).unwrap_err();
+        assert!(
+            matches!(err, SkillsError::Invalid { ref name, .. } if name == "mine"),
+            "{err:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn catalog_fails_when_frontmatter_name_disagrees_with_the_directory() {
+        let dir = temp_dir("mismatch");
+        std::fs::create_dir_all(dir.join("mine")).unwrap();
+        std::fs::write(
+            dir.join("mine/SKILL.md"),
+            "---\nname: other\ndescription: d\n---\nbody\n",
+        )
+        .unwrap();
+        let source = DirectorySource::new(dir.clone()).unwrap();
+        let err = build_catalog(&source, CatalogLocation::Embedded).unwrap_err();
+        assert!(
+            matches!(err, SkillsError::Invalid { ref name, .. } if name == "mine"),
+            "{err:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn catalog_builds_skills_from_a_source() {
+        let dir = temp_dir("build");
+        std::fs::create_dir_all(dir.join("mine/references")).unwrap();
+        std::fs::write(
+            dir.join("mine/SKILL.md"),
+            "---\nname: mine\ndescription: Mine.\n---\nbody\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("mine/references/commands.md"), "ado-cli status\n").unwrap();
+        let source = DirectorySource::new(dir.clone()).unwrap();
+        let catalog = build_catalog(&source, CatalogLocation::Embedded).unwrap();
+        assert_eq!(catalog.skills.len(), 1);
+        let skill = &catalog.skills[0];
+        assert_eq!(skill.name, "mine");
+        assert_eq!(skill.description, "Mine.");
+        assert!(skill.content.contains("body"));
+        assert_eq!(skill.files.len(), 1);
+        assert_eq!(skill.files[0].path, "references/commands.md");
+        assert_eq!(skill.files[0].content, "ado-cli status\n");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }
