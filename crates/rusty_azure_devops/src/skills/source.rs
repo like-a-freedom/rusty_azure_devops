@@ -64,6 +64,16 @@ pub(crate) fn is_hidden_segment(path: &str) -> bool {
     path.split('/').any(|segment| segment.starts_with('.'))
 }
 
+/// Normalize a path to use `/` separators.
+///
+/// The exact-path `--ref` contract depends on this: a path written with `/`
+/// must match a file found under a root whose native separator is `\`.
+/// `include_dir` normalizes the embedded tree itself, but a filesystem
+/// source has to do it here.
+pub(crate) fn normalize_separators(path: &str) -> String {
+    path.replace('\\', "/")
+}
+
 /// Walk the embedded tree, accumulating `(relative path, bytes)`.
 fn collect_embedded(dir: &include_dir::Dir<'_>, prefix: &str, out: &mut Vec<(String, Vec<u8>)>) {
     for entry in dir.entries() {
@@ -104,7 +114,7 @@ fn collect_dir(
         let path = entry.path();
         let relative = path
             .strip_prefix(root)
-            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .map(|p| normalize_separators(&p.to_string_lossy()))
             .unwrap_or_default();
         if is_hidden_segment(&relative) {
             continue;
@@ -279,5 +289,58 @@ mod tests {
         assert!(is_hidden_segment("core/references/.hidden"));
         assert!(!is_hidden_segment("core/SKILL.md"));
         assert!(!is_hidden_segment("core/references/commands.md"));
+    }
+
+    #[test]
+    fn separators_are_normalized_to_slash() {
+        // A Windows-style path is a single segment on Unix, so the input is
+        // written by hand: the function must not depend on the host
+        // separator, or the test would be vacuous on Linux and macOS.
+        assert_eq!(
+            normalize_separators("core\\references\\commands.md"),
+            "core/references/commands.md"
+        );
+        assert_eq!(
+            normalize_separators("core/references/commands.md"),
+            "core/references/commands.md"
+        );
+        assert_eq!(normalize_separators(""), "");
+    }
+
+    #[test]
+    fn the_embedded_walk_skips_dotfiles() {
+        // A synthetic embedded tree, because the real one cannot hold a
+        // dotfile: `.DS_Store` is gitignored, so it is never present in the
+        // compiled-in tree and an assertion over the real tree would pass
+        // vacuously.
+        let nested = [include_dir::DirEntry::File(include_dir::File::new(
+            "core/references/.hidden",
+            b"junk",
+        ))];
+        let core = [
+            include_dir::DirEntry::File(include_dir::File::new("core/.DS_Store", b"junk")),
+            include_dir::DirEntry::File(include_dir::File::new("core/SKILL.md", b"body")),
+            include_dir::DirEntry::Dir(include_dir::Dir::new("core/references", &nested)),
+        ];
+        let entries = [include_dir::DirEntry::Dir(include_dir::Dir::new(
+            "core", &core,
+        ))];
+        let tree = include_dir::Dir::new("", &entries);
+
+        let mut files = Vec::new();
+        collect_embedded(&tree, "", &mut files);
+        let paths: Vec<&str> = files.iter().map(|(p, _)| p.as_str()).collect();
+        assert!(
+            !paths.iter().any(|p| p.contains(".DS_Store")),
+            "the embedded walk must skip dotfiles: {paths:?}"
+        );
+        assert!(
+            !paths.iter().any(|p| p.contains(".hidden")),
+            "the embedded walk must skip dotfiles in subdirectories: {paths:?}"
+        );
+        assert!(
+            paths.contains(&"core/SKILL.md"),
+            "the embedded walk must keep real files: {paths:?}"
+        );
     }
 }

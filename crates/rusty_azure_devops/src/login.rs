@@ -74,28 +74,21 @@ impl CommandError {
 impl From<crate::skills::SkillsError> for CommandError {
     fn from(err: crate::skills::SkillsError) -> Self {
         use crate::skills::SkillsError;
-        match err {
-            SkillsError::SkillNotFound { name } => CommandError::new(
-                "skill_not_found",
-                format!("no skill named '{name}'"),
-                "ado-cli skills list".to_string(),
-            ),
-            SkillsError::ReferenceNotFound { skill, path } => CommandError::new(
+        let (reason, hint) = match &err {
+            SkillsError::SkillNotFound { .. } => {
+                ("skill_not_found", "ado-cli skills list".to_string())
+            }
+            SkillsError::ReferenceNotFound { skill, .. } => (
                 "reference_not_found",
-                format!("'{path}' is not a file of skill '{skill}'"),
                 format!("ado-cli skills get {skill} --full"),
             ),
-            SkillsError::Invalid { name, detail } => CommandError::new(
-                "validation_failed",
-                format!("skill '{name}' is unusable: {detail}"),
-                "ado-cli skills list".to_string(),
-            ),
-            SkillsError::Io { detail } => CommandError::new(
+            SkillsError::Invalid { .. } => ("validation_failed", "ado-cli skills list".to_string()),
+            SkillsError::Io { .. } => (
                 "io_error",
-                detail,
                 "check the ADO_CLI_SKILLS_DIR override, or unset it".to_string(),
             ),
-        }
+        };
+        CommandError::new(reason, err.to_string(), hint)
     }
 }
 

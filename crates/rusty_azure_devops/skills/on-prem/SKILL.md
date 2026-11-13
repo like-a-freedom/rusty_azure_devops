@@ -9,9 +9,10 @@ Azure DevOps Server runs older API versions than `dev.azure.com` and rejects
 parameter combinations the cloud accepts. Three of those differences change
 the command you should run.
 
-- `--expand` and `--fields` cannot be combined. The server drops `fields` when
-  `expand` is set, so `ado-cli get-work-item <ID> --fields System.Title
-  --expand relations` returns the default field set. Pick one.
+- `--expand` and `--fields` cannot be combined. The server rejects the
+  combination, so the client drops `fields` when `expand` is set.
+  `ado-cli get-work-item <ID> --fields System.Title --expand relations`
+  returns the default field set. Pick one.
 - `--expand Comments` is not supported. Read the discussion thread with
   `ado-cli comments <ID>`, which uses the dedicated comments API.
 - `ado-cli add-comment` falls back to the `System.History` field when the

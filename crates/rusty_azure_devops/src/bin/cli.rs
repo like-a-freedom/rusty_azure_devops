@@ -435,7 +435,7 @@ fn dispatch_skills(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 if json {
                     println!(
                         "{}",
-                        rusty_azure_devops::skills::format::skill_detail_json(skill)
+                        rusty_azure_devops::skills::format::skill_full_json(skill)
                     );
                 } else {
                     print!(

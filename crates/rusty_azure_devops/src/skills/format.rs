@@ -36,13 +36,18 @@ pub struct SkillListEntry {
 }
 
 /// One skill, as it appears in `skills get`.
+///
+/// `files` is absent for the plain `get` envelope and present for `--full`.
 #[derive(Debug, Clone, Serialize)]
 pub struct SkillDetail {
     pub name: String,
     pub description: String,
     /// The whole SKILL.md, verbatim, including its frontmatter.
     pub content: String,
-    pub files: Vec<FileEntry>,
+    /// The skill's supporting files, with their content. Absent unless the
+    /// caller asked for them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files: Option<Vec<FileEntry>>,
 }
 
 /// A file entry carrying its content.
@@ -100,13 +105,27 @@ pub fn skill_list_human(catalog: &SkillCatalog) -> String {
     out
 }
 
-/// The JSON envelope for `skills get`.
+/// The JSON envelope for `skills get`: the skill alone, without its
+/// supporting files.
 pub fn skill_detail_json(skill: &Skill) -> serde_json::Value {
     let detail = SkillDetail {
         name: skill.name.clone(),
         description: skill.description.clone(),
         content: skill.content.clone(),
-        files: skill.files.iter().map(file_with_content).collect(),
+        files: None,
+    };
+    serde_json::json!({ "ok": true, "name": detail.name, "description": detail.description,
+        "content": detail.content })
+}
+
+/// The JSON envelope for `skills get --full`: the skill plus every supporting
+/// file and its content.
+pub fn skill_full_json(skill: &Skill) -> serde_json::Value {
+    let detail = SkillDetail {
+        name: skill.name.clone(),
+        description: skill.description.clone(),
+        content: skill.content.clone(),
+        files: Some(skill.files.iter().map(file_with_content).collect()),
     };
     serde_json::json!({ "ok": true, "name": detail.name, "description": detail.description,
         "content": detail.content, "files": detail.files })
@@ -204,8 +223,29 @@ mod tests {
     }
 
     #[test]
+    fn detail_json_omits_files_but_full_json_carries_them() {
+        let skill = &sample().skills[0];
+        let detail = skill_detail_json(skill);
+        assert!(
+            detail.get("files").is_none(),
+            "the plain `get` envelope must not carry files: {detail}"
+        );
+        assert_eq!(detail["name"], serde_json::json!("core"));
+
+        let full = skill_full_json(skill);
+        assert_eq!(
+            full["files"][0]["path"],
+            serde_json::json!("references/commands.md")
+        );
+        assert_eq!(
+            full["files"][0]["content"],
+            serde_json::json!("ado-cli status\n")
+        );
+    }
+
+    #[test]
     fn skill_full_json_carries_content() {
-        let v = skill_detail_json(&sample().skills[0]);
+        let v = skill_full_json(&sample().skills[0]);
         assert!(v["content"].as_str().unwrap().contains("body"));
         assert_eq!(
             v["files"][0]["content"],

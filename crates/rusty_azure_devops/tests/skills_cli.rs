@@ -80,6 +80,43 @@ fn skills_get_json_carries_name_description_and_content() {
 }
 
 #[test]
+fn skills_get_json_omits_files_and_full_json_carries_them() {
+    let plain = ado_cli()
+        .args(["skills", "get", "core", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let plain: serde_json::Value = serde_json::from_slice(&plain).unwrap();
+    assert_eq!(plain["name"], serde_json::json!("core"));
+    assert!(
+        plain.get("files").is_none(),
+        "the plain get envelope must not carry files: {plain}"
+    );
+
+    let full = ado_cli()
+        .args(["skills", "get", "core", "--full", "--json"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let full: serde_json::Value = serde_json::from_slice(&full).unwrap();
+    assert_eq!(
+        full["files"][0]["path"],
+        serde_json::json!("references/commands.md")
+    );
+    assert!(
+        full["files"][0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("ado-cli get-work-item"),
+        "full must carry file content: {full}"
+    );
+}
+
+#[test]
 fn skills_get_ref_prints_one_file() {
     let out = ado_cli()
         .args(["skills", "get", "core", "--ref", "references/commands.md"])

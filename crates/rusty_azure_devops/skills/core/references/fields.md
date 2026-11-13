@@ -61,10 +61,11 @@ Markdown:
   the Markdown back to HTML before patching.
 
 So the Markdown that comes out of a read can be fed straight back into a
-write:
+write. In `--json` the description sits under `fields`, keyed by its
+reference name:
 
 ```bash
-DESC=$(ado-cli get-work-item 42 --description --json | jq -r '.description')
+DESC=$(ado-cli get-work-item 42 --description --json | jq -r '.fields["System.Description"]')
 ado-cli update-work-item 42 --field "System.Description=$DESC"
 ```
 

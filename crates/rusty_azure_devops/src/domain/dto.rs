@@ -282,6 +282,30 @@ mod tests {
         assert_eq!(RelationDto::work_item_id_from_url(url), None);
     }
 
+    /// The `skills/core/references/fields.md` round-trip recipe reads the
+    /// description with `jq -r '.fields["System.Description"]'`. Pin the
+    /// path so the shipped skill cannot name a path that does not exist.
+    #[test]
+    fn get_work_item_result_nests_the_description_under_fields() {
+        let result = GetWorkItemResult {
+            id: 42,
+            rev: Some(1),
+            fields: WorkItemFields {
+                title: Some("T".to_string()),
+                description: Some("D".to_string()),
+                extra: None,
+            },
+            comments: None,
+            relations: None,
+        };
+        let json = serde_json::to_value(&result).unwrap();
+        assert_eq!(json["fields"]["System.Description"], "D");
+        assert!(
+            json.get("description").is_none(),
+            "the description is not at the top level: {json}"
+        );
+    }
+
     #[test]
     fn get_work_item_result_with_relations_format_ids() {
         let result = GetWorkItemResult {
