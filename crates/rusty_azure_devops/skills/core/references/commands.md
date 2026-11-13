@@ -45,10 +45,12 @@ For automation, prefer the environment variable or `--token-stdin` over
 ## JSON output
 
 `--json` shapes the **runtime** errors: they go to stderr as
-`{"ok":false,"reason","detail","hint"}`, stdout stays empty, and the exit
-code is 1. The `reason` is a stable token: `missing_value`,
-`confirmation_required`, `validation_failed`, `not_logged_in`, `io_error`,
-`skill_not_found`, `reference_not_found`.
+`{"ok":false,"reason","detail","hint"}` and stdout stays empty. The `reason`
+is a stable token: `missing_value`, `confirmation_required`,
+`validation_failed`, `not_logged_in`, `io_error`, `skill_not_found`,
+`reference_not_found`. The exit code is 1, except `confirmation_required`,
+which exits 3 so that a re-run with `--force` is distinguishable from an
+ordinary failure.
 
 **Usage errors are not JSON.** An unknown flag, a missing argument, or
 `--full` together with `--ref` produces clap's plain-text usage message on
@@ -129,8 +131,9 @@ The project is the `--project` **flag**, not a positional argument.
 ### `ado-cli comments` and `ado-cli add-comment`
 
 `comments` reads the discussion thread of a work item. `add-comment` appends
-to it. On-prem servers fall back to the `System.History` field when the
-comments API is unavailable.
+to it. On on-prem servers `add-comment` falls back to the `System.History`
+field when the comments API is unavailable; `comments` has no such fallback
+and reports the failure instead.
 
 ### `ado-cli get-query-results`
 

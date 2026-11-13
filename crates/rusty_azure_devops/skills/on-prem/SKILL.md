@@ -12,7 +12,7 @@ the command you should run.
 - `--expand` and `--fields` cannot be combined. The server rejects the
   combination, so the client drops `fields` when `expand` is set.
   `ado-cli get-work-item <ID> --fields System.Title --expand relations`
-  returns the default field set. Pick one.
+  therefore returns every field, not just `System.Title`. Pick one.
 - `--expand Comments` is not supported. Read the discussion thread with
   `ado-cli comments <ID>`, which uses the dedicated comments API.
 - `ado-cli add-comment` falls back to the `System.History` field when the

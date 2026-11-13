@@ -131,6 +131,32 @@ fn skills_get_ref_prints_one_file() {
 }
 
 #[test]
+fn skills_get_ref_json_carries_the_path_and_content() {
+    let out = ado_cli()
+        .args([
+            "skills",
+            "get",
+            "core",
+            "--ref",
+            "references/wiql.md",
+            "--json",
+        ])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
+    assert_eq!(v["ok"], serde_json::json!(true));
+    assert_eq!(v["name"], serde_json::json!("core"));
+    assert_eq!(v["path"], serde_json::json!("references/wiql.md"));
+    assert!(
+        v["content"].as_str().unwrap().contains("SELECT"),
+        "the envelope must carry the file content: {v}"
+    );
+}
+
+#[test]
 fn skills_get_full_marks_each_file_with_its_path() {
     let out = ado_cli()
         .args(["skills", "get", "core", "--full"])
@@ -341,7 +367,10 @@ fn override_path_is_reported_as_absolute() {
         .clone();
     let v: serde_json::Value = serde_json::from_slice(&out).unwrap();
     let path = v["path"].as_str().unwrap();
-    assert!(path.starts_with('/'), "path must be absolute: {path}");
+    assert!(
+        std::path::Path::new(path).is_absolute(),
+        "path must be absolute: {path}"
+    );
     std::fs::remove_dir_all(&dir).ok();
 }
 

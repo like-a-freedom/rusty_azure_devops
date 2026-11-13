@@ -35,11 +35,14 @@ pub struct SkillListEntry {
     pub files: Vec<FileEntry>,
 }
 
-/// One skill, as it appears in `skills get`.
+/// The JSON envelope for `skills get` and `skills get --full`.
 ///
 /// `files` is absent for the plain `get` envelope and present for `--full`.
+/// The struct is what actually gets serialized, so a new field cannot be
+/// added here and then forgotten in the output.
 #[derive(Debug, Clone, Serialize)]
-pub struct SkillDetail {
+pub struct SkillEnvelope {
+    pub ok: bool,
     pub name: String,
     pub description: String,
     /// The whole SKILL.md, verbatim, including its frontmatter.
@@ -108,27 +111,37 @@ pub fn skill_list_human(catalog: &SkillCatalog) -> String {
 /// The JSON envelope for `skills get`: the skill alone, without its
 /// supporting files.
 pub fn skill_detail_json(skill: &Skill) -> serde_json::Value {
-    let detail = SkillDetail {
+    let envelope = SkillEnvelope {
+        ok: true,
         name: skill.name.clone(),
         description: skill.description.clone(),
         content: skill.content.clone(),
         files: None,
     };
-    serde_json::json!({ "ok": true, "name": detail.name, "description": detail.description,
-        "content": detail.content })
+    serde_json::to_value(envelope).expect("a SkillEnvelope always serializes")
 }
 
 /// The JSON envelope for `skills get --full`: the skill plus every supporting
 /// file and its content.
 pub fn skill_full_json(skill: &Skill) -> serde_json::Value {
-    let detail = SkillDetail {
+    let envelope = SkillEnvelope {
+        ok: true,
         name: skill.name.clone(),
         description: skill.description.clone(),
         content: skill.content.clone(),
         files: Some(skill.files.iter().map(file_with_content).collect()),
     };
-    serde_json::json!({ "ok": true, "name": detail.name, "description": detail.description,
-        "content": detail.content, "files": detail.files })
+    serde_json::to_value(envelope).expect("a SkillEnvelope always serializes")
+}
+
+/// The JSON envelope for `skills get --ref <path>`: one supporting file.
+pub fn skill_file_json(skill: &Skill, file: &SkillFile) -> serde_json::Value {
+    serde_json::json!({
+        "ok": true,
+        "name": skill.name,
+        "path": file.path,
+        "content": file.content,
+    })
 }
 
 /// The human form of `skills get`: the SKILL.md, byte for byte.

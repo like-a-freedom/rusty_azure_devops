@@ -9,6 +9,13 @@ use super::SkillsError;
 /// the path uses `/` separators and is relative to the skill root.
 pub trait SkillSource {
     fn files(&self) -> Result<Vec<(String, Vec<u8>)>, SkillsError>;
+
+    /// The names of the skill directories this source contains, including
+    /// directories that hold no files.
+    ///
+    /// A directory with no `SKILL.md` is as unusable as one whose files
+    /// lack a manifest, so the catalog needs to see it either way.
+    fn skill_directories(&self) -> Result<Vec<String>, SkillsError>;
 }
 
 /// The skill tree compiled into this binary.
@@ -23,6 +30,18 @@ impl SkillSource for EmbeddedSource {
         collect_embedded(&EMBEDDED, "", &mut out);
         out.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(out)
+    }
+
+    fn skill_directories(&self) -> Result<Vec<String>, SkillsError> {
+        Ok(EMBEDDED
+            .dirs()
+            .filter_map(|dir| {
+                dir.path()
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+            })
+            .filter(|name| !is_hidden_segment(name))
+            .collect())
     }
 }
 
@@ -53,6 +72,31 @@ impl SkillSource for DirectorySource {
         collect_dir(&self.root, &self.root, &mut out)?;
         out.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(out)
+    }
+
+    fn skill_directories(&self) -> Result<Vec<String>, SkillsError> {
+        let entries = std::fs::read_dir(&self.root).map_err(|e| SkillsError::Io {
+            detail: format!("{}: {e}", self.root.display()),
+        })?;
+        let mut names = Vec::new();
+        for entry in entries {
+            let entry = entry.map_err(|e| SkillsError::Io {
+                detail: format!("{}: {e}", self.root.display()),
+            })?;
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_default();
+            if !is_hidden_segment(&name) {
+                names.push(name);
+            }
+        }
+        names.sort();
+        Ok(names)
     }
 }
 

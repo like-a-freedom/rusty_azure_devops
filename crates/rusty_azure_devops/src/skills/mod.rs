@@ -201,8 +201,12 @@ pub(crate) fn build_catalog(
             .push((rest.to_string(), bytes));
     }
 
-    let mut skills = Vec::with_capacity(by_skill.len());
-    for (name, entries) in by_skill {
+    // Iterate the declared skill directories, not the groups that have
+    // files: a directory with no files at all is still a skill directory
+    // without a manifest, and it must fail the catalog too.
+    let mut skills = Vec::new();
+    for name in source.skill_directories()? {
+        let entries = by_skill.get(&name).map(Vec::as_slice).unwrap_or(&[]);
         let skill_md = entries
             .iter()
             .find(|(path, _)| path == "SKILL.md")
@@ -227,11 +231,11 @@ pub(crate) fn build_catalog(
         }
 
         let mut files: Vec<SkillFile> = entries
-            .into_iter()
-            .filter(|(path, _)| path != "SKILL.md")
+            .iter()
+            .filter(|(path, _)| path.as_str() != "SKILL.md")
             .map(|(path, bytes)| SkillFile {
-                path,
-                content: String::from_utf8_lossy(&bytes).into_owned(),
+                path: path.clone(),
+                content: String::from_utf8_lossy(bytes).into_owned(),
             })
             .collect();
         files.sort_by(|a, b| a.path.cmp(&b.path));
@@ -386,6 +390,19 @@ mod tests {
         assert!(
             matches!(err, SkillsError::Invalid { ref name, .. } if name == "mine"),
             "{err:?}"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn catalog_fails_when_a_skill_directory_is_empty() {
+        let dir = temp_dir("empty-dir");
+        std::fs::create_dir_all(dir.join("mine")).unwrap();
+        let source = DirectorySource::new(dir.clone()).unwrap();
+        let err = build_catalog(&source, CatalogLocation::Embedded).unwrap_err();
+        assert!(
+            matches!(err, SkillsError::Invalid { ref name, .. } if name == "mine"),
+            "an empty skill directory is as unusable as one without a SKILL.md: {err:?}"
         );
         std::fs::remove_dir_all(&dir).ok();
     }

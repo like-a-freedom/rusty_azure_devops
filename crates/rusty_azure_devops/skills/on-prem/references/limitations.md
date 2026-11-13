@@ -6,7 +6,7 @@ not affected.
 
 | Quirk | What happens | What to do instead |
 |---|---|---|
-| `$expand` and `fields` cannot be combined | The server rejects the combination, so the client drops `fields` when `expand` is set and you get the default field set | Pick one. Use `--expand relations` on its own, or fetch fields without expanding |
+| `$expand` and `fields` cannot be combined | The server rejects the combination, so the client drops `fields` when `expand` is set and the server returns every field | Pick one. Use `--expand relations` on its own, or fetch fields without expanding |
 | `expand=Comments` is not supported | The request fails | Use `ado-cli comments <ID>`, which reads the thread through the dedicated comments API |
 | The comments API needs a different API version | It requires `6.0-preview`, not `6.0` | Nothing to do. The client handles this. You never pass a version yourself |
 | `add-comment` may fall back to history | When the comments API is unavailable, the comment is written to the `System.History` field instead of the discussion thread | Read the thread with `ado-cli comments <ID>`. On a server with a working comments API this does not happen |

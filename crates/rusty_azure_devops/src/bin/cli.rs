@@ -418,12 +418,7 @@ fn dispatch_skills(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 if json {
                     println!(
                         "{}",
-                        serde_json::json!({
-                            "ok": true,
-                            "name": skill.name,
-                            "path": file.path,
-                            "content": file.content,
-                        })
+                        rusty_azure_devops::skills::format::skill_file_json(skill, file)
                     );
                 } else {
                     print!(
