@@ -1,6 +1,6 @@
 # rusty_azure_devops
 
-MCP server and CLI for on-premises Azure DevOps Server — proxies work item, project, and comment operations through the Azure DevOps REST API.
+MCP server and CLI for on-premises Azure DevOps Server, proxying work item, project, and comment operations through the Azure DevOps REST API.
 
 ## Language
 
@@ -17,7 +17,7 @@ A team project in Azure DevOps that contains work items, repos, and pipelines.
 _Avoid_: collection, team
 
 **Tool**:
-One of the ten operations the MCP server exposes to AI agents (`get_status`, `list_projects`, `get_work_item`, `create_work_item`, `update_work_item`, `manage_work_item_link`, `search_work_items`, `get_workitem_comments`, `get_query_results`, `add_comment`). The single source of truth is the `Tool` enum in `tools.rs` — `get_info` prose and the CLI `Command` enum are derived from it; a parity test enforces `Tool ⊇ CliCommand`. The CLI does not have to mirror MCP params 1:1, but every CLI command must name a `Tool` that exists.
+One of the ten operations the MCP server exposes to AI agents (`get_status`, `list_projects`, `get_work_item`, `create_work_item`, `update_work_item`, `manage_work_item_link`, `search_work_items`, `get_workitem_comments`, `get_query_results`, `add_comment`). The single source of truth is the `Tool` enum in `tools.rs`: `get_info` prose and the CLI `Command` enum are derived from it; a parity test enforces `Tool ⊇ CliCommand`. The CLI does not have to mirror MCP params 1:1, but every CLI command must name a `Tool` that exists.
 _Avoid_: command (the CLI name), tool name, handler method
 
 **Relation**:
@@ -52,11 +52,11 @@ _Avoid_: auth command, setup wizard, signin
 **UserConfig**:
 The user-level `~/.config/rusty_azure_devops/config.yaml` written by `login` (mode 0600,
 `logout` deletes it). A `config.yaml` next to the binary takes precedence on load and can
-shadow it — both commands report that via `shadow_warning`.
+shadow it. Both commands report that via `shadow_warning`.
 _Avoid_: global config, settings.json
 
 **Skill**:
-An agent-facing usage guide served by `ado-cli skills` — a `SKILL.md` with YAML
+An agent-facing usage guide served by `ado-cli skills`: a `SKILL.md` with YAML
 frontmatter (`name`, `description`) plus optional `references/` files, embedded in
 the binary and rebuilt with the CLI it describes. Its directory name is its
 addressing key and must equal its frontmatter `name`.
@@ -65,7 +65,7 @@ _Avoid_: doc, guide, manual, playbook
 **Skill File**:
 A supporting file inside a Skill, addressed by its exact path relative to the
 skill root using `/` separators. `SKILL.md` is not a Skill File. The file set
-is matched exactly — no file-name or stem fallback — so a lookup is never
+is matched exactly, with no file-name or stem fallback, so a lookup is never
 ambiguous.
 _Avoid_: reference file, attachment, asset
 
@@ -76,13 +76,13 @@ partially-served Catalog.
 _Avoid_: registry, index, manifest
 
 **Catalog Location**:
-Where a Skill Catalog came from — `Embedded` (compiled into the binary) or
+Where a Skill Catalog came from: `Embedded` (compiled into the binary) or
 `Directory` (a path on disk). `ADO_CLI_SKILLS_DIR` selects the latter and
 replaces the bundled Catalog entirely.
 _Avoid_: source, origin, provider
 
 **Skills Error**:
-The domain error raised by the skills module — `SkillNotFound`,
+The domain error raised by the skills module: `SkillNotFound`,
 `ReferenceNotFound`, `Invalid`, `Io`. The CLI maps each variant onto a stable
 `reason` token; the domain never names a reason token or an exit code.
 _Avoid_: skill failure, skill error, catalog error
@@ -90,7 +90,7 @@ _Avoid_: skill failure, skill error, catalog error
 ## Test doubles
 
 **InMemoryAzureClient**:
-The test adapter for `AzureDevOpsClient` — holds work items, projects, comments, and query results in plain collections. Implements the trait directly without depending on `RetryStrategy` or `OnPremFallback`. Configurable per-method error injection through optional error fields. Sensible defaults via `Default`.
+The test adapter for `AzureDevOpsClient`: holds work items, projects, comments, and query results in plain collections. Implements the trait directly without depending on `RetryStrategy` or `OnPremFallback`. Configurable per-method error injection through optional error fields. Sensible defaults via `Default`.
 _Avoid_: MockAzureClient, MockBuilder, mock client
 
 ## Operations
@@ -104,33 +104,33 @@ The module that runs saved/shared Azure DevOps queries by URL or (project, query
 _Avoid_: query service
 
 **WorkItemOperations**:
-The module that owns work item CRUD and search — create, update, get, and search. Absorbs Patch Document construction, HTML-to-Markdown conversion (on read via `normalize_description_fields`) and Markdown-to-HTML conversion (on write via `markdown_to_html`). Holds `ServiceConfig` (needs `default_project` for search fallback). Organised as `operations/work_item.rs`; shared micro-helpers (`normalize_description_fields`, `rewrite_missing_fields_error`) live in `operations/helpers.rs`.
+The module that owns work item CRUD and search: create, update, get, and search. Absorbs Patch Document construction, HTML-to-Markdown conversion (on read via `normalize_description_fields`) and Markdown-to-HTML conversion (on write via `markdown_to_html`). Holds `ServiceConfig` (needs `default_project` for search fallback). Organised as `operations/work_item.rs`; shared micro-helpers (`normalize_description_fields`, `rewrite_missing_fields_error`) live in `operations/helpers.rs`.
 _Avoid_: work item service, WI handler
 
 **LinkOperations**:
-The module that manages relations between work items — add and remove. Holds `ServiceConfig` (needs `base_url` to construct relation URLs from integer target IDs). Organised as `operations/link.rs`.
+The module that manages relations between work items: add and remove. Holds `ServiceConfig` (needs `base_url` to construct relation URLs from integer target IDs). Organised as `operations/link.rs`.
 _Avoid_: link service, relation handler
 
 **CommentOperations**:
-The module that manages work item discussion comments — get and add. Takes only `Arc<dyn AzureDevOpsClient>` — no config needed (comment operations don't require base_url or default_project). Organised as `operations/comment.rs`.
+The module that manages work item discussion comments: get and add. Takes only `Arc<dyn AzureDevOpsClient>`, with no config needed (comment operations don't require base_url or default_project). Organised as `operations/comment.rs`.
 _Avoid_: comment service, discussion handler
 
 **ProjectLookup**:
-The module that owns project-level queries — list_projects and get_status. Two-method interface, thin by nature (few project-level operations exist).
+The module that owns project-level queries: list_projects and get_status. Two-method interface, thin by nature (few project-level operations exist).
 _Avoid_: project service
 
 **ServiceConfig**:
-Non-secret runtime configuration shared by WorkItemOperations, LinkOperations, and ProjectLookup — base_url, default_project, token_present. Cloned (not Arc-shared) into each module from a single source in bootstrap. CommentOperations does not hold ServiceConfig.
+Non-secret runtime configuration shared by WorkItemOperations, LinkOperations, and ProjectLookup: base_url, default_project, token_present. Cloned (not Arc-shared) into each module from a single source in bootstrap. CommentOperations does not hold ServiceConfig.
 _Avoid_: service context, app config (use for general app-level configuration)
 
 ## Resilience
 
 **RetryStrategy**:
-How the client adapts to transient transport instability — retries failed SDK calls with exponential backoff and jitter. One-method interface (`retry_policy() -> &RetryPolicy`). Substituted independently of `OnPremFallback`; tests use the default-constructed `NoOpRetry`, production uses `ProductionRetry` (env-driven `RT_RETRY_MAX` / `RT_BASE_DELAY_MS`).
+How the client adapts to transient transport instability: retries failed SDK calls with exponential backoff and jitter. One-method interface (`retry_policy() -> &RetryPolicy`). Substituted independently of `OnPremFallback`; tests use the default-constructed `NoOpRetry`, production uses `ProductionRetry` (env-driven `RT_RETRY_MAX` / `RT_BASE_DELAY_MS`).
 _Avoid_: retry logic, retry handler
 
 **OnPremFallback**:
-How the client bypasses the Azure SDK when it cannot parse on-prem Azure DevOps Server responses — a direct HTTP GET that iterates API versions × 2 auth-header variants (`:PAT` and `user:PAT` Basic). One-method interface (`get(path) -> Result<serde_json::Value>`). Substituted independently of `RetryStrategy`; `Option<Arc<dyn OnPremFallback>>` on `AzureSdkClient` — `None` for cloud URLs (which never fall back), `Some(ProductionFallback)` for on-prem. Test adapter `NoOpFallback` returns `NotImplemented`.
+How the client bypasses the Azure SDK when it cannot parse on-prem Azure DevOps Server responses: a direct HTTP GET that iterates API versions × 2 auth-header variants (`:PAT` and `user:PAT` Basic). One-method interface (`get(path) -> Result<serde_json::Value>`). Substituted independently of `RetryStrategy`; `Option<Arc<dyn OnPremFallback>>` on `AzureSdkClient` — `None` for cloud URLs (which never fall back), `Some(ProductionFallback)` for on-prem. Test adapter `NoOpFallback` returns `NotImplemented`.
 _Avoid_: fallback handler, on-prem GET, fallback_get (use the trait method name)
 
 **SDK Error Heuristic**:

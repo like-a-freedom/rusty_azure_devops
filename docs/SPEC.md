@@ -1,7 +1,7 @@
 # SRS — rusty_azure_devops
 
-**Version:** 0.1 (draft)
-**Date:** 2025-12-20
+**Version:** 0.7
+**Date:** 2026-11-14
 
 ## 1. Project overview
 
@@ -10,7 +10,7 @@
 **Purpose:** An MCP (Model Context Protocol) server in Rust (stable) that works with an on-premises Azure DevOps Server through the REST API. It exposes a set of tools over stdio (rmcp) for basic Work Item (WI) operations: create, read (fields, links, comments), update, and search.
 
 **Constraints:**
-- Authentication may be omitted (a trusted environment is assumed); PAT support is configured optionally.
+- Authentication is mandatory. The server refuses to start without `ADO_TOKEN` and `ADO_BASE_URL` (FR-9).
 - No attachments in the first release.
 - No local persistence or cache is required.
 - Works with any project the API token has access to.
@@ -26,7 +26,8 @@
 - WI — a Work Item in Azure DevOps (Bug, Task, User Story, Custom, etc.).
 - MCP — Model Context Protocol (rmcp implementation).
 - rmcp — the Rust crate for implementing MCP (supports stdio transport, tools, schema validation, etc.).
-- azclient — the internal HTTP client abstraction for talking to the Azure DevOps REST API.
+- azure_devops_client — the library crate holding the `AzureDevOpsClient` trait, the `azure_devops_rust_api` adapter, and the resilience seams.
+- Skill — an agent-facing usage guide served by `ado-cli skills` (FR-10).
 
 ## 3.1 Configuration: environment variables (required)
 
@@ -40,11 +41,12 @@ Required and recommended environment variables:
 - `ADO_API_VERSION` (optional) — the REST API version; the default is **latest** (when supported by the client library) and can be overridden via ENV.
 - `ADO_DEFAULT_PROJECT` (optional) — if set, used as the default project for commands where `project` is not passed.
 - `ADO_CA_CERT` (optional) — path to a PEM/DER custom CA for TLS connections to the on-prem server; the certificate is added to the Azure SDK HTTP clients and the fallback separately, without changing `SSL_CERT_FILE`.
+- `ADO_CLI_SKILLS_DIR` (optional) — replaces the bundled agent skills with a directory of your own. An empty value is treated as unset; a missing directory is an error rather than a silent fallback.
 - `RUST_LOG` — the log level (`info`, `warn`, `debug`, `trace`).
 
 Note: configuration changes only by updating environment variables and restarting the service.
 
-Update 2026-10: primary human/agent path is ado-cli login (see FR-8); the ENV-only statement above applies to the MCP server runtime.
+Update 2026-11: the primary human and agent path is `ado-cli login` (FR-9), and `ado-cli skills` (FR-10) needs no configuration at all. The ENV-only statement above applies to the MCP server runtime.
 
 ## 4. Functional requirements (FR)
 
@@ -81,7 +83,7 @@ FR-5: Manage Work Item Links
   - Negative case: removing a nonexistent relation returns a clear `relation not found` error.
   - Input and output schemas live in `docs/schemas/manage_work_item_link.schema.json` and `manage_work_item_link_result.schema.json`.
 
-FR-5: Management commands and project discovery
+FR-6: Management commands and project discovery
 - Description: configuration is set only via ENV (see section 3.1); MCP exposes only tools for reading/inspecting configuration and dynamically discovering resources.
 - Commands:
   - `get_status` — returns the current configuration (without secrets) and the connection state to Azure DevOps.
@@ -89,21 +91,21 @@ FR-5: Management commands and project discovery
 - Default project: when `project` is not passed to a tool, MCP applies this priority order: 1) `ADO_DEFAULT_PROJECT` (if set), 2) if exactly one project is available for the token, that project is used, 3) otherwise the command returns an error requiring an explicit `project`.
 - Note: `set_instance` / `set_token` commands are **not supported**; changing configuration requires updating ENV and restarting the service.
 
-FR-6: StdIO / rmcp contract
+FR-7: StdIO / rmcp contract
 - Description: every command is registered as an rmcp tool with explicit JSON input/output schemas (schemars).
 - Acceptance: schemas validate, and client compatibility is preserved.
 
-FR-7: Errors and retry
+FR-8: Errors and retry
 - Transient errors (timeouts/5xx): retry with exponential backoff (max 3 attempts).
 - Client errors (4xx): do not retry; return a structured error with the code and message.
 
-FR-8: Primary authorization (login)
+FR-9: Primary authorization (login)
 - Description: the `ado-cli login` CLI command saves the PAT and the server URL to the user config `~/.config/rusty_azure_devops/config.yaml` with 0600 permissions. Values come from flags (`--base-url`, `--token`, `--token-stdin`), then environment (`ADO_BASE_URL`, `ADO_TOKEN`), then interactive prompts (TTY only, PAT input hidden). Before saving, a verification through `list_projects` runs (disabled with `--no-verify`). URL scheme validation always applies: remote HTTP URLs are not saved even with `--no-verify`.
 - Implementation: `ado-cli login [--base-url --token|--token-stdin --organization --project --api-version --ca-cert --force --no-verify --json]`, `ado-cli logout [--json]`.
 - Acceptance: without a TTY and without flags or env values, the command exits quickly with `missing_value` (exit code 1) instead of blocking on input; overwriting an existing config requires `--force` (otherwise `confirmation_required`, exit code 3); with `--json`, errors go to stderr as `{"ok":false,"reason","detail","hint"}` and stdout stays empty; the token is never printed in any mode.
 
-FR-9: Built-in agent skills
-- Description: `ado-cli skills` serves agent-facing usage guides embedded in the binary, so they always match the installed CLI version. Subcommands: `list`, `get <name> [--full] [--ref <path>]`, `path`. CLI-only — no MCP tool (ADR-0017), like `login`/`logout`.
+FR-10: Built-in agent skills
+- Description: `ado-cli skills` serves agent-facing usage guides embedded in the binary, so they always match the installed CLI version. Subcommands: `list`, `get <name> [--full] [--ref <path>]`, `path`. CLI-only, with no MCP tool (ADR-0017), like `login`/`logout`.
 - Implementation: skill files live in `crates/rusty_azure_devops/skills/<name>/SKILL.md` with optional `references/`, embedded at compile time via `include_dir!`. `ADO_CLI_SKILLS_DIR` replaces the bundled catalog for local iteration; an empty value is treated as unset, and a missing directory is an error rather than a silent fallback. The command is dispatched before credential loading.
 - Acceptance: `ado-cli skills get core` prints the skill markdown byte-exactly and works with no `ADO_TOKEN`, no config file, and no network; `ado-cli skills list --json` returns `{"ok":true,"skills":[…]}`; runtime errors go to stderr as `{"ok":false,"reason","detail","hint"}` with stable reasons `skill_not_found`, `reference_not_found`, `validation_failed`, `io_error` and exit code 1, stdout empty on failure; clap usage errors remain plain text with exit code 2 even under `--json`; a test guards that the skill documents every CLI command and no other.
 
@@ -113,7 +115,7 @@ NFR-1: Performance
 - Targets: P50 < 300ms for simple GET/CREATE; P95 < 1s under normal LAN conditions.
 
 NFR-2: Scalability
-- Expected load: roughly 0-100 RPS; the architecture should allow scaling the azclient if needed.
+- Expected load: roughly 0-100 RPS. The architecture should allow scaling the HTTP client if needed.
 
 NFR-3: Reliability
 - Availability target: 99.5% in a production environment under normal load.
@@ -122,7 +124,7 @@ NFR-4: Extensibility
 - The `AzureDevOpsClient` interface is a Rust trait; new backend drivers can be added without changing `rusty_azure_devops`.
 
 NFR-5: Observability and logging
-- Structured logging: a `tracing`-compatible format is required, with levels `info`, `warn`, `debug`, `trace`. The log format is JSON-compatible with fields `timestamp`, `level`, `target`, `message`, `context`.
+- Structured logging through `tracing`, with levels `info`, `warn`, `debug`, `trace`. The format is JSON-compatible with fields `timestamp`, `level`, `target`, `message`, `context`.
 - Metrics: Prometheus/metrics are not required in the first release; additional metrics can be added later on request.
 - Tracing: OpenTelemetry is optional and not required for the MVP. Logs must not contain secrets (API tokens, keys, credentials).
 
@@ -138,29 +140,37 @@ NFR-6: Security
 ## 6. Architecture and design
 
 ### Components
-1. `rusty_azure_devops` — the rmcp-based server: registers tools, handles the stdio transport (stdin/stdout) through `rmcp`, validates schemas, manages timeouts, routes tools, and handles request/response lifecycle.
-2. `azclient` — the `AzureDevOpsClient` trait and a default thin implementation over `azure_devops_rust_api` (async). It encapsulates API versioning, retry/backoff with jitter, and rate-limit handling (429/`Retry-After`), and provides high-level operations (create/get/update/search WI). Note: the retry/backoff utility is implemented inside `azure_devops_client::retry` (no separate crate for retry utilities is used).
-3. `config` — the ENV-only config loader and project discovery logic (`list_projects`), including the `ADO_DEFAULT_PROJECT` selection rule or automatic use of the single available project.
-4. `logging` — a centralized structured logging subsystem (`tracing`, JSON-compatible) with secret filtering/sanitization and support for `info|warn|debug|trace` levels.
+1. `rusty_azure_devops` — the rmcp-based server and the CLI. It registers tools, handles the stdio transport through `rmcp`, validates schemas, routes tools, and owns the CLI command surface including `ado-cli skills`.
+2. `azure_devops_client` — the `AzureDevOpsClient` trait, the `azure_devops_rust_api` adapter, and the two resilience seams `RetryStrategy` (backoff with jitter) and `OnPremFallback` (the direct HTTP GET that bypasses the SDK for on-prem quirks).
+3. `operations/` — the shared service layer. `WorkItemOperations`, `LinkOperations`, `CommentOperations`, `ProjectLookup`, and `QueryOperations` hold the business logic; both the MCP handler and the CLI call them.
+4. `domain/` — the DTOs, parameter structs, Patch Document construction, and the constants.
+5. `config` — the config loader (ENV, `config.yaml`, and CLI overrides) and the `ADO_DEFAULT_PROJECT` selection rule.
+6. `skills/` — the agent usage guides embedded in the binary and served by `ado-cli skills`.
 
 ### Dataflow
-Client → stdio/rmcp → rusty_azure_devops.tool → azclient (HTTP) → Azure DevOps → azclient → rusty_azure_devops → client (JSON).
+Client → stdio/rmcp → `rusty_azure_devops` handler → `operations/` → `AzureDevOpsClient` → Azure DevOps → back again as JSON.
+
+The CLI follows the same path, from clap arguments to the same operations, so the two interfaces cannot diverge.
 
 ### Design decisions
 - Use the `rmcp` crate for the stdio transport and the server logic (details below, under "Notes on `rmcp`").
 - `AzureDevOpsClient` as a trait for easily testable mock/fake implementations.
-- Retry/backoff is built into `azclient`.
+- Retry/backoff and the on-prem fallback are two separate seams in `azure_devops_client::resilience`.
 - The `api-version` is a parameterizable configuration setting.
+- The skill content is embedded at compile time, so it is rebuilt and re-versioned with the CLI it describes.
 
-### Recommended crates
-- rmcp (MCP protocol, schema validation, stdio transport); get current information via Context7 (see note below).
+### Crates in use
+- rmcp (MCP protocol, schema validation, stdio transport)
+- azure_devops_rust_api (the Azure DevOps client, `wit` and `core` features)
 - tokio (async runtime)
-- reqwest (HTTP client) or hyper
 - serde / serde_json (serialization)
 - schemars (JSON schema generation for tool contracts)
-- tracing / opentelemetry / prometheus exporter
-- thiserror / anyhow (errors)
-- wiremock (tests)
+- serde_yaml (config and skill frontmatter)
+- clap (CLI argument parsing)
+- include_dir (embedding the skill content at compile time)
+- tracing (structured logging)
+- thiserror (errors)
+- wiremock (HTTP-level tests)
 
 ## 7. Notes on `rmcp` (refreshed via Context7)
 
@@ -223,7 +233,7 @@ output: `{ "ids": [1,2,3], "total": 3 }` (with details=true, the detailed record
 - Input message parsing, schema validation, and helper functions (patch generation) are fully covered by unit tests.
 
 ### Integration tests
-- Test `azclient` against `wiremock` or a similar mock server with canned Azure responses.
+- Test `azure_devops_client` against `wiremock` with canned Azure responses.
 - Test retry/timeout/404/5xx behavior.
 
 ### End-to-end tests
@@ -238,20 +248,24 @@ output: `{ "ids": [1,2,3], "total": 3 }` (with details=true, the detailed record
 - Update: applies the patch; rev increments; a failed test op returns Conflict.
 - Search: WIQL returns the expected ids; details → the batch GET returns correct fields.
 
+### Skill content tests
+- The skill's command map is compared against the CLI command list in both directions.
+- The skills' factual claims (reason tokens, exit codes, JSON paths, on-prem behaviour) are pinned to the implementation.
+
 ### CI
-- GitHub Actions: lint, clippy, cargo test (unit + integration), validate schemars, run contract tests.
+- GitHub Actions: fmt, clippy, cargo test (unit + integration), schemars validation, contract tests.
 
 ## 11. Risks and limitations
 
 - Azure REST API versioning: different on-prem installations may support different preview versions; keep `api-version` configurable.
 - Without attachments and caching in the first release, some user workflows are limited.
-- Trusted environment assumption: if MCP is deployed in a less trusted network, authentication/authorization and encryption must be added.
+- Authentication is mandatory, so a deployment in an untrusted network still depends on the PAT staying out of logs and process arguments.
 
 ## 12. Open questions (need confirmation)
 
-1. Do we need default WI field/template support (an include/exclude set of standard fields)?
-2. Do we need bulk operations (bulk create/update)?
-3. The default log level and retention requirements for metrics/logs.
+1. Do we need bulk operations (bulk create/update)?
+2. The default log level and retention requirements for metrics/logs.
+3. Whether the skills should also be served over the MCP skills extension (SEP-2640).
 
 ## 13. Acceptance checklist (short)
 
@@ -261,6 +275,7 @@ output: `{ "ids": [1,2,3], "total": 3 }` (with details=true, the detailed record
 - [ ] Search WI: WIQL → ids; details → correct records.
 - [ ] StdIO tools: schemas validate and match the contract.
 - [x] Retry & error handling: covered by tests.
+- [x] Agent skills: `ado-cli skills get core` prints the guide byte-exactly, with no token and no network.
 
 ## 14. Appendices and links
 
@@ -268,11 +283,13 @@ output: `{ "ids": [1,2,3], "total": 3 }` (with details=true, the detailed record
 - Working with work items (Create/Get/Update/WIQL): https://learn.microsoft.com/en-us/rest/api/azure/devops/wit/
 - rmcp crate (refreshed via Context7): https://docs.rs/rmcp/latest/
 - Reference implementation (study): https://github.com/like-a-freedom/rusty-intervals-mcp
-- Implementation Plan: ./IMPLEMENTATION_PLAN.md
+- Architecture Decision Records: ./adr/
 
 ## 15. Recommendation: reuse `azure_devops_rust_api` for the client implementation
 
-In short: rather than hand-writing a low-level HTTP client, reuse the official `azure_devops_rust_api` crate (v0.32.0). It is auto-generated from the Azure DevOps OpenAPI specification and already contains the `wit` (Work Item Tracking) module, WIQL/search, and the related clients.
+> Historical. This recommendation was implemented; `azure_devops_rust_api` is the client in use today.
+
+In short: rather than hand-writing a low-level HTTP client, reuse the official `azure_devops_rust_api` crate. It is auto-generated from the Azure DevOps OpenAPI specification and already contains the `wit` (Work Item Tracking) module, WIQL/search, and the related clients.
 
 Why this is safe and worthwhile:
 - It covers many endpoints, including Work Item Tracking and Search.
@@ -283,7 +300,7 @@ How to integrate into `rusty_azure_devops`:
 1. Add the dependency to `Cargo.toml` (pin the minimum verified version):
 
 ```toml
-azure_devops_rust_api = { version = "0.32.0", features = ["wit","work","search"] }
+azure_devops_rust_api = { version = "0.39.1", features = ["wit","core"] }
 ```
 
 2. Implement the `AzureDevOpsClient` trait (described in the NFR/architecture section) as a thin wrapper over `azure_devops_rust_api`:

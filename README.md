@@ -1,10 +1,13 @@
 # Azure DevOps MCP Server & CLI
 
-[![CI](https://github.com/<your-org>/rusty_azure_devops/actions/workflows/ci.yml/badge.svg)](https://github.com/<your-org>/rusty_azure_devops/actions)
-[![Release](https://img.shields.io/github/v/release/<your-org>/rusty_azure_devops?label=release)](https://github.com/<your-org>/rusty_azure_devops/releases)
+[![CI](https://github.com/like-a-freedom/rusty_azure_devops/actions/workflows/ci.yml/badge.svg)](https://github.com/like-a-freedom/rusty_azure_devops/actions)
+[![Release](https://img.shields.io/github/v/release/like-a-freedom/rusty_azure_devops?label=release)](https://github.com/like-a-freedom/rusty_azure_devops/releases)
 ![Rust](https://img.shields.io/badge/rust-stable-orange.svg)
 
-Rust-based Azure DevOps client that runs as an **MCP server** (for VS Code Copilot, Claude, etc.) or as a **standalone CLI**. Both interfaces share the same business logic — no duplication.
+Rust-based Azure DevOps client that runs as an **MCP server** (for VS Code
+Copilot, Claude, and other MCP clients) or as a **standalone CLI**. Both
+interfaces call the same operations, so the behaviour they expose cannot
+diverge.
 
 ---
 
@@ -15,14 +18,12 @@ Rust-based Azure DevOps client that runs as an **MCP server** (for VS Code Copil
 | `azure_devops_client` | HTTP client with trait abstraction, retry/backoff, SDK + mock implementations |
 | `rusty_azure_devops` | MCP server, CLI binary, tool definitions, shared service layer |
 
-**Two binaries** ship from `rusty_azure_devops`:
+Two binaries ship from `rusty_azure_devops`:
 
 | Binary | Role | Transport |
 |---|---|---|
 | `ado-mcp` | MCP server for AI clients | stdio (RMCP protocol) |
-| `ado-cli` | Command-line tool for humans | terminal |
-
-Both call the same operations — `WorkItemOperations` and `ProjectLookup` are the source of truth for business logic.
+| `ado-cli` | Command-line tool for humans and agents | terminal |
 
 ---
 
@@ -45,7 +46,8 @@ Both call the same operations — `WorkItemOperations` and `ProjectLookup` are t
 
 ## Agent skills
 
-The CLI ships usage guides for AI agents, version-matched to the binary:
+The CLI ships usage guides for AI agents, embedded in the binary so they
+always match the installed version:
 
 ```sh
 ado-cli skills list            # available skills
@@ -54,18 +56,15 @@ ado-cli skills get core --full # with its reference files
 ado-cli skills path            # where the catalog came from
 ```
 
-Skills are embedded in the binary, so they always match the installed
-version — no token, no network, no install step. The `core` skill covers the
-workflow and the command surface; the `on-prem` skill covers Azure DevOps
-Server (TFS) quirks.
-
-See `ado-cli skills --help`.
+No token, no network, no install step. The `core` skill covers the workflow
+and the command surface; the `on-prem` skill covers Azure DevOps Server (TFS)
+quirks. Run `ado-cli skills --help` for the full surface.
 
 ---
 
 ## Configuration
 
-### First run (recommended)
+### First run
 
 ```sh
 ado-cli login
@@ -78,21 +77,26 @@ ado-cli status --include-projects
 
 ```sh
 echo "$ADO_TOKEN" | ado-cli login --base-url URL --token-stdin --force --json
-# secret hygiene: prefer ADO_TOKEN env or --token-stdin (argv leaks via ps/history).
-# exit codes: 0 ok, 2 usage, 3 needs --force, 1 other; errors are JSON on stderr
-# with stable `reason` (missing_value, confirmation_required, validation_failed,
-# not_logged_in, io_error) and a copy-pasteable `hint`. stdout stays empty on failure.
-ado-cli status --include-projects --json
 ```
+
+Prefer `ADO_TOKEN` or `--token-stdin` over `--token`: an argument is visible
+in `ps` and in shell history.
+
+Exit codes are `0` for success, `2` for a usage error, `3` when `--force` is
+needed, and `1` for everything else. Runtime errors print JSON on stderr as
+`{"ok":false,"reason","detail","hint"}` with a stable `reason`
+(`missing_value`, `confirmation_required`, `validation_failed`,
+`not_logged_in`, `io_error`, `skill_not_found`, `reference_not_found`) and a
+copy-pasteable `hint`. Stdout stays empty on failure.
 
 ### Priority chain
 
-Settings resolve in this order (highest wins):
+Settings resolve in this order, highest wins:
 
 1. **CLI flags** (`--token`, `--base-url`)
 2. **Environment variables**
 3. **`config.yaml`** (written by `ado-cli login`; next to the binary, or `~/.config/rusty_azure_devops/config.yaml`)
-4. **Defaults** (none for required fields — server exits with error)
+4. **Defaults** — none for required fields, the server exits with an error instead
 
 ### Config reference
 
@@ -104,6 +108,7 @@ Settings resolve in this order (highest wins):
 | `ADO_API_VERSION` | no | — | REST API version override |
 | `ADO_DEFAULT_PROJECT` | no | — | Default project when not specified in calls |
 | `ADO_CA_CERT` | no | — | Path to custom CA certificate (PEM or DER) for on-prem / self-signed servers |
+| `ADO_CLI_SKILLS_DIR` | no | — | Replaces the bundled agent skills with a directory of your own |
 
 ### `ADO_BASE_URL` examples
 
@@ -112,11 +117,13 @@ Settings resolve in this order (highest wins):
 | Azure DevOps Services (cloud) | `https://dev.azure.com/yourorg` |
 | On-prem TFS / Azure DevOps Server | `https://tfs.example.com/tfs/DefaultCollection` |
 
-> On-prem: include the collection path. Set `ADO_DEFAULT_PROJECT` to avoid empty project segments in URLs (causes 404/401).
+On-prem, include the collection path. Set `ADO_DEFAULT_PROJECT` so a project
+segment is never empty, which causes a 404 or 401.
 
 ### Custom CA certificates
 
-For on-prem servers with self-signed or corporate CA certificates, set `ADO_CA_CERT` to the certificate file path (PEM or DER format):
+On-prem servers with self-signed or corporate CA certificates need
+`ADO_CA_CERT` pointing at the certificate file (PEM or DER):
 
 ```sh
 export ADO_CA_CERT="/path/to/corporate-root-ca.cer"
@@ -128,14 +135,16 @@ Or add it to `config.yaml`:
 ado_ca_cert: "/path/to/corporate-root-ca.cer"
 ```
 
-The certificate is loaded into the Azure SDK and on-prem fallback HTTP clients for this process. The application does not modify the process-wide `SSL_CERT_FILE` environment variable. PEM and DER certificate files are supported.
+The certificate is loaded into the Azure SDK and the on-prem fallback HTTP
+clients for this process. The process-wide `SSL_CERT_FILE` environment
+variable is left alone.
 
 ### YAML config file
 
-The binary looks for `config.yaml` in two locations (first found wins):
+The binary looks for `config.yaml` in two locations, first found wins:
 
-1. **Next to the binary** — in the same directory as `ado-mcp` / `ado-cli`
-2. **`~/.config/rusty_azure_devops/config.yaml`** — user-level config (XDG-style, written by `ado-cli login` — do not hand-edit secrets)
+1. **Next to the binary**, in the same directory as `ado-mcp` / `ado-cli`
+2. **`~/.config/rusty_azure_devops/config.yaml`**, written by `ado-cli login`. Do not hand-edit secrets here.
 
 **Cloud (Azure DevOps Services):**
 
@@ -152,7 +161,7 @@ ado_default_project: "Demo"
 ado_token: "your_pat"
 ado_base_url: "https://tfs.example.com/tfs/DefaultCollection"
 ado_default_project: "MyProject"
-# ado_organization is not needed — collection path is already in ado_base_url
+# ado_organization is not needed — the collection path is already in ado_base_url
 ```
 
 A ready-to-copy example: [`config.example.yaml`](config.example.yaml).
@@ -163,19 +172,18 @@ A ready-to-copy example: [`config.example.yaml`](config.example.yaml).
 
 ### Prerequisites
 
-- Rust (stable)
-- Cargo
-- Optional: Docker
+- Rust (stable) and Cargo
+- Optionally, Docker
 
 ### Install from source
 
 ```sh
-git clone https://github.com/<your-org>/rusty_azure_devops.git
+git clone https://github.com/like-a-freedom/rusty_azure_devops.git
 cd rusty_azure_devops
 cargo install --path crates/rusty_azure_devops
 ```
 
-This builds `ado-mcp` and `ado-cli` binaries into `~/.cargo/bin/`. Verify:
+This builds `ado-mcp` and `ado-cli` into `~/.cargo/bin/`. Verify:
 
 ```sh
 ado-mcp --help
@@ -185,9 +193,6 @@ ado-cli status --include-projects
 ### Run with Cargo (development)
 
 ```sh
-git clone https://github.com/<your-org>/rusty_azure_devops.git
-cd rusty_azure_devops
-
 export ADO_TOKEN="your_pat"
 export ADO_BASE_URL="https://dev.azure.com/yourorg"
 
@@ -209,44 +214,7 @@ docker run -i --rm \
   ghcr.io/<org>/rusty-azure-devops:local
 ```
 
----
-
-## Deployment
-
-### Binary installation
-
-```sh
-# Build and install from local checkout
-cargo install --path crates/rusty_azure_devops
-```
-
-Binaries land in `~/.cargo/bin/`:
-
-| Binary | Purpose |
-|---|---|
-| `ado-mcp` | MCP server for AI clients (stdio transport) |
-| `ado-cli` | CLI for humans |
-
-### Environment setup
-
-Set required variables in your shell profile (`~/.bashrc`, `~/.zshrc`, etc.) or use a `config.yaml`:
-
-```sh
-export ADO_TOKEN="your_pat"
-export ADO_BASE_URL="https://dev.azure.com/yourorg"
-export ADO_DEFAULT_PROJECT="Demo"          # optional
-export ADO_CA_CERT="/path/to/ca.cer"       # optional, on-prem only
-```
-
-### Verify installation
-
-```sh
-ado-cli status --include-projects
-```
-
-### Configure MCP client
-
-Point your MCP client (VS Code, Claude Desktop, Cursor, etc.) to the installed binary. See [MCP server](#mcp-server-vs-code--copilot) for client-specific configs.
+The image ships `ado-mcp` only.
 
 ---
 
@@ -257,7 +225,7 @@ Point your MCP client (VS Code, Claude Desktop, Cursor, etc.) to the installed b
 ```
 --token <PAT>        Override ADO_TOKEN
 --base-url <URL>     Override ADO_BASE_URL
---json               Output raw JSON instead of formatted text
+--json               Output JSON instead of formatted text
 ```
 
 ### Commands
@@ -285,8 +253,8 @@ ado-cli update-work-item 123 --patch '[{"op":"add","path":"/fields/System.Tags",
 ado-cli manage-link add 100 101 --link-type System.LinkTypes.Related
 ado-cli manage-link remove 100 101
 
-# Search
-ado-cli search Demo --wiql "SELECT [System.Id] FROM WorkItems WHERE [System.State] = 'Active'" --details
+# Search (the project is a flag, not a positional argument)
+ado-cli search --project Demo --wiql "SELECT [System.Id] FROM WorkItems WHERE [System.State] = 'Active'" --details
 
 # Comments
 ado-cli comments 123
@@ -296,6 +264,10 @@ ado-cli get-query-results --url 'https://dev.azure.com/yourorg/MyProject/_querie
 
 # Add comment
 ado-cli add-comment 123 'Build passed'
+
+# Agent skills
+ado-cli skills list
+ado-cli skills get core --full
 ```
 
 ---
@@ -339,7 +311,9 @@ Add the following entry to your MCP client's config file.
 }
 ```
 
-> **No `env` section?** Place [`config.yaml`](#yaml-config-file) next to the `ado-mcp` binary instead — it supports the same settings. The binary looks for it in its own directory at startup.
+Without an `env` section, place a [`config.yaml`](#yaml-config-file) next to the
+`ado-mcp` binary instead. It accepts the same settings, and the binary looks
+for it in its own directory at startup.
 
 ### Client config locations
 
@@ -348,9 +322,9 @@ Add the following entry to your MCP client's config file.
 | VS Code | `~/.vscode/mcp-servers.json` |
 | Claude Desktop (macOS) | `~/Library/Application Support/Claude/claude_desktop_config.json` |
 | Claude Desktop (Windows) | `%APPDATA%\Claude\claude_desktop_config.json` |
-| Cursor / Windsurf | Check client docs — typically `~/.cursor/mcp.json` or project-level `.cursor/mcp.json` |
+| Cursor / Windsurf | Check the client docs, usually `~/.cursor/mcp.json` or a project-level `.cursor/mcp.json` |
 
-Restart the client. Try:
+Restart the client, then try:
 
 - `@ado-mcp list projects`
 - `@ado-mcp create_work_item project=Demo type=Task fields.{System.Title}="Test"`
@@ -359,15 +333,16 @@ Restart the client. Try:
 
 ## Prompt examples
 
-Use natural language with Copilot or Claude — the server maps prompts to tool calls:
+Use natural language with Copilot or Claude; the server maps prompts to tool
+calls:
 
-- "Find all open bugs in Demo and summarize last comments."
+- "Find all open bugs in Demo and summarize the last comments."
 - "Create a Task in Demo titled 'Investigate build failure' with comment 'CI failed on Linux'."
 - "Show work item 123 with comments and related items."
 
 ---
 
-## Tags & custom fields
+## Tags and custom fields
 
 Tags are semicolon-separated strings in `System.Tags`:
 
@@ -381,7 +356,8 @@ Custom fields use their reference name:
 {"op":"add","path":"/fields/Custom.EstimationExpectedDate","value":"2026-03-01"}
 ```
 
-> To append a tag without overwriting: `get_work_item` → read `System.Tags` → `update_work_item` with the combined value.
+To append a tag without overwriting, read `System.Tags` with `get_work_item`,
+then send the combined value in `update_work_item`.
 
 ---
 
@@ -389,43 +365,49 @@ Custom fields use their reference name:
 
 ```
  ado-cli (clap) ──┐
-                   ├──▶ Modules.work_items ──▶ AzureDevOpsClient trait ──▶ AzureSdkClient (SDK)
- ado-mcp (rmcp) ──┘    Modules.projects     │                                       InMemoryAzureClient (tests)
-                         │
-                   domain.rs (DTOs + builder)
+                   ├──▶ operations/* ──▶ AzureDevOpsClient trait ──▶ AzureSdkClient (SDK)
+ ado-mcp (rmcp) ──┘    work_item, link,      │                       InMemoryAzureClient (tests)
+                        comment, project,     │
+                        query                 │
+                   domain/ (DTOs, params, builder, conversions)
                    config.rs  (YAML + env)
-                   resilience.rs (ResilienceStrategy trait + RetryPolicy)
+                   skills/    (embedded agent guides)
+                   resilience (RetryStrategy + OnPremFallback)
 ```
 
-- **`WorkItemOperations`** — 6 async methods for work item / link / comment tools. No IO, no protocol-specific types.
-- **`ProjectLookup`** — 2 async methods for project enumeration + status. No IO.
-- **`AdoMcpHandler`** — thin adapter: `Parameters<T>` → operations/lookup → `Json<T>`.
-- **`cli.rs`** — clap args → operations/lookup → formatted output or `--json`.
-- **`Config`** — loads YAML from binary dir, merges env vars, accepts CLI overrides.
-- **`ResilienceStrategy`** — object-safe trait with `ProductionResilience` (retry + on-prem fallback) and `NoOpResilience` (tests). `RetryPolicy` provides exponential backoff with jitter.
+- **`WorkItemOperations`** — work item CRUD and search, plus relations and comments. Owns Patch Document construction and the HTML/Markdown conversion.
+- **`LinkOperations`** — adds and removes relations between work items.
+- **`CommentOperations`** — reads and appends discussion comments.
+- **`ProjectLookup`** — project enumeration and server status.
+- **`QueryOperations`** — runs a saved query and returns matching IDs.
+- **`AdoMcpHandler`** — a thin adapter from `Parameters<T>` to the operations, returning `Json<T>`.
+- **`skills/`** — the agent usage guides embedded in the binary, served by `ado-cli skills`.
+- **`Config`** — loads YAML from the binary directory, merges environment variables, and accepts CLI overrides.
+- **`RetryStrategy`** and **`OnPremFallback`** — two seams for resilience: exponential backoff with jitter, and the direct HTTP GET that bypasses the SDK for on-prem quirks.
 
-Refer to [`CONTEXT.md`](CONTEXT.md) for the domain glossary, [`docs/adr/`](docs/adr/) for architectural decision records, and [`docs/SPEC.md`](docs/SPEC.md) for the full specification.
+[`CONTEXT.md`](CONTEXT.md) holds the domain glossary,
+[`docs/adr/`](docs/adr/) the architectural decision records, and
+[`docs/SPEC.md`](docs/SPEC.md) the full specification.
 
 ---
 
 ## Development
 
 ```sh
-# Tests
 cargo test --workspace
-
-# Lint
-cargo fmt
-cargo clippy --all-targets --all-features
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-Key test suites:
+Test suites:
 
-| Command | What it tests |
+| Command | What it covers |
 |---|---|
-| `cargo test -p rusty_azure_devops` | Service logic + MCP adapter + config |
-| `cargo test -p azure_devops_client` | HTTP client, retry, mock |
-
+| `cargo test -p azure_devops_client` | HTTP client, retry, on-prem fallback, mock |
+| `cargo test -p rusty_azure_devops --lib` | Operations, domain, skills module |
+| `cargo test -p rusty_azure_devops --test schema_validation` | MCP tool schemas, the CLI-to-tool parity check, the skill command-map guard |
+| `cargo test -p rusty_azure_devops --test skills_cli` | The `ado-cli skills` command surface |
+| `cargo test -p rusty_azure_devops --test skill_content` | The skills' factual claims against the implementation |
 
 ---
 
@@ -433,9 +415,9 @@ Key test suites:
 
 | Problem | Fix |
 |---|---|
-| `missing ADO_TOKEN` / `missing ADO_BASE_URL` | Set env vars, add to `config.yaml`, or pass `--token`/`--base-url` |
-| `cargo check` fails on `RoleClient` | Enable `client` feature in `Cargo.toml` (already enabled by default) |
-
+| `missing ADO_TOKEN` / `missing ADO_BASE_URL` | Run `ado-cli login`, set the environment variables, add them to `config.yaml`, or pass `--token` and `--base-url` |
+| `cargo check` fails on `RoleClient` | Enable the `client` feature in `Cargo.toml`. It is on by default |
+| A skill mentions a flag the CLI no longer has | Run `ado-cli skills get core` to read the version that shipped with your binary |
 
 ---
 

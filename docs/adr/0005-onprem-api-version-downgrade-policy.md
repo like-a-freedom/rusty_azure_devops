@@ -6,7 +6,7 @@
 request builder. On-prem Azure DevOps Server instances support at most API version 6.0,
 so all SDK-generated requests fail with a 400 error (`VssVersionOutOfRangeException`).
 
-We introduced `DowngradeApiVersionPolicy` — a custom `azure_core::http::policies::Policy`
+We introduced `DowngradeApiVersionPolicy`, a custom `azure_core::http::policies::Policy`
 that intercepts HTTP requests and rewrites `api-version=7.1-preview` to the configured
 version (the first entry in `api_versions`, defaulting to `6.0` when no explicit
 `ado_api_version` is set). The policy is attached to both `wit_client` and `core_client`

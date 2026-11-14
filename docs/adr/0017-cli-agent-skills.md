@@ -1,6 +1,6 @@
-# Built-in agent skills — CLI-only, version-matched
+# Built-in agent skills: CLI-only, version-matched
 
-Status: proposed
+**Status**: proposed
 
 The knowledge an AI agent needs to drive `ado-cli` correctly exists only in
 places an agent never reads: `AGENTS.md` carries the on-prem TFS limitations
@@ -15,13 +15,13 @@ guides from inside the binary. The guides are `SKILL.md` files with YAML
 frontmatter (`name`, `description`) plus optional `references/`, laid out per
 the Agent Skills specification, and embedded at compile time with
 `include_dir!`. Because the content ships with the binary, the guidance is
-rebuilt and re-versioned with the CLI it describes — the drift above cannot
+rebuilt and re-versioned with the CLI it describes, so the drift above cannot
 recur silently.
 
 The surface follows `agent-browser skills get core`: `ado-cli skills list`,
 `ado-cli skills get <name> [--full] [--ref <path>]`, and `ado-cli skills path`.
 `skills` is dispatched before credential loading, so it works with no token and
-no server — it is usable as an agent's first command. It is discoverable from
+no server, which makes it usable as an agent's first command. It is discoverable from
 `ado-cli --help`, which lists it and points at it from a footer.
 
 The skills module is a bounded context of its own: it knows nothing about the
@@ -51,13 +51,13 @@ report a location that is not the one being served.
 
 Serving skills over the MCP SEP-2640 extension (`skills/list`, `skills/get`,
 `resources/read`). `rmcp 3.9.0` already supports it natively, so this is a
-follow-up rather than a rewrite — but a skill's guidance is only worth serving
+follow-up rather than a rewrite. A skill's guidance is only worth serving
 over MCP if MCP clients actually consume it, and the extension is recent. The
 CLI reaches every agent that can run a command, which is the larger audience
 today.
 
 `skills install`, writing copies into `~/.claude/skills` and similar. It
-duplicates what `get` already does live and reintroduces staleness — the exact
+duplicates what `get` already does live and reintroduces staleness, the exact
 problem this feature exists to remove. The `get` model works with any harness
 without harness-specific directories.
 
@@ -70,8 +70,7 @@ its own change. Usage errors therefore stay clap's plain text with exit code 2,
 while `--json` shapes the runtime errors; the skill documents the difference.
 
 Deriving the skill's command map from `--help` output at build time. Clap's
-rendering is presentation — wrapping, indentation, the synthetic `help` entry
-— so a clap upgrade would break it without any real drift. The CLI command
+rendering is presentation (wrapping, indentation, the synthetic `help` entry), so a clap upgrade would break it without any real drift. The CLI command
 list the repo already maintains is the declared statement of "these are the
 CLI commands".
 
@@ -82,16 +81,16 @@ binary, and the release notes should mention it. The `skills` directory stays
 small by convention, and its size is visible in the release binary.
 
 `include_dir` embeds every file under `skills/`, including dotfiles, so the
-walk skips them — an operating system must not add content to a skill. Its
+walk skips them, because an operating system must not add content to a skill. Its
 `tracked_path` call is a no-op on stable Rust, so a `build.rs` emits
 `cargo:rerun-if-changed=skills`; without it, adding a skill file would leave
 the binary stale and the skill would silently not ship.
 
-Both binaries link the library and therefore both carry the embedded bytes — a
+Both binaries link the library and therefore both carry the embedded bytes. A
 few kilobytes in `ado-mcp`, which never uses them. The library is the right
 home because the integration tests need to reach it.
 
 `AGENTS.md` loses its copy of the on-prem quirk matrix and points at
 `ado-cli skills get on-prem` instead. The test guard covers the command map,
 not prose, so a developer working on the client reads the matrix from the
-skill — one command, one source of truth.
+skill: one command, one source of truth.

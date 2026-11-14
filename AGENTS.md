@@ -1,7 +1,7 @@
 
 # About This Project
 
-This repository contains an MCP server and CLI for on-premises Azure DevOps Server — proxies work item, project, and comment operations through the Azure DevOps REST API.
+This repository contains an MCP server and CLI for on-premises Azure DevOps Server, proxying work item, project, and comment operations through the Azure DevOps REST API.
 
 ## Project Structure
 
@@ -338,15 +338,15 @@ $CLI search --wiql "SELECT [System.Id] FROM WorkItems WHERE [System.Id] = 999999
 # 10. JSON output
 $CLI get-work-item 9999999 --json | head -5
 
-# 11. Manage links (add then remove — cleans up after itself)
+# 11. Manage links (add, then remove; cleans up after itself)
 $CLI manage-link add 9999999 9999998 --link-type System.LinkTypes.Related
 $CLI manage-link remove 9999999 9999998 --link-type System.LinkTypes.Related
 ```
 
-**Known on-prem TFS limitations:**
-- `$expand` and `fields` params cannot be used together — client drops `fields` when expand is set.
-- `expand=Comments` is not supported on on-prem — comments are fetched separately via the comments API.
-- Comments API requires `api-version=6.0-preview` (not `6.0`), bypassed via `OnPremFallback::get_with_api_version`.
+**Known on-prem TFS limitations:** see `ado-cli skills get on-prem` for the
+current list. The short version: the client drops `fields` when `expand` is
+set, `expand=Comments` is unsupported, and the comments API needs
+`api-version=6.0-preview`.
 - Write efficient, idiomatic code and avoid needless allocation or complexity. Prioritize correct, maintainable solutions over premature micro-optimizations; document any trade-offs.
 
 You are an expert in Rust, async programming, and concurrent systems. Apply these rules where applicable and keep the language idiomatic to the area you're working in.
@@ -442,10 +442,10 @@ Patterns to Follow
 Patterns to Avoid
 
 - Don’t use unwrap() or expect() unless absolutely necessary.
-- Avoid panics in library code—return Result instead.
-- Don’t rely on global mutable state—use dependency injection or thread-safe containers.
-- Avoid deeply nested logic—refactor with functions or combinators.
-- Don’t ignore warnings—treat them as errors during CI.
+- Avoid panics in library code. Return Result instead.
+- Don’t rely on global mutable state. Use dependency injection or thread-safe containers.
+- Avoid deeply nested logic. Refactor with functions or combinators.
+- Don’t ignore warnings. Treat them as errors during CI.
 - Avoid unsafe unless required and fully documented.
 
 Security

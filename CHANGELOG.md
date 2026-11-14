@@ -5,10 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.0] - 2026-11-14
 
 ### Added
-- `ado-cli skills` serves built-in agent usage guides (`core`, `on-prem`) from inside the binary, so the guidance always matches the installed CLI version. `ado-cli skills list`, `ado-cli skills get <name>`, `ado-cli skills path`.
+- `ado-cli skills` serves built-in agent usage guides from inside the binary, so the guidance always matches the installed CLI version. `ado-cli skills list`, `ado-cli skills get <name>`, `ado-cli skills get <name> --full`, `ado-cli skills get <name> --ref <path>`, and `ado-cli skills path`. Two skills ship: `core` (workflow and command surface) and `on-prem` (Azure DevOps Server quirks). The command needs no token, no config file, and no network.
+- `ADO_CLI_SKILLS_DIR` replaces the bundled skills with a directory of your own, for iterating on skill content without a rebuild.
+- `ado-cli skills` is CLI-only, with no MCP tool, like `login` and `logout`.
+
+### Changed
+- Documentation refreshed across `README.md`, `CONTEXT.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, `docs/SPEC.md`, `docs/RELEASE.md`, and the ADRs. The specification's requirements are renumbered to remove a duplicate `FR-5`, and the architecture section now describes the crates and modules as they exist.
+- The README's `ado-cli search` example used a positional project argument. The project is the `--project` flag, so the example now matches the CLI.
+
+### Fixed
+- `ado-cli skills path` ended without a trailing newline, which ran its output into the next shell prompt.
 
 ## [0.6.0] - 2026-11-09
 
