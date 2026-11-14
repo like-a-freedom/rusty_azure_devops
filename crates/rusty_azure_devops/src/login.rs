@@ -418,6 +418,20 @@ mod tests {
     }
 
     #[test]
+    fn the_envelope_detail_is_the_domain_message() {
+        use crate::skills::SkillsError;
+
+        // The domain error's `Display` is the single source of the message
+        // text; the envelope must not re-word it.
+        let err = SkillsError::SkillNotFound {
+            name: "nope".into(),
+        };
+        let cmd: CommandError = err.clone().into();
+        assert_eq!(cmd.detail, err.to_string());
+        assert!(cmd.detail.contains("nope"), "{}", cmd.detail);
+    }
+
+    #[test]
     fn resolve_credentials_prefers_flags_over_env() {
         let (url, token) = resolve_credentials(
             Some("https://flag.example.com".to_string()),
