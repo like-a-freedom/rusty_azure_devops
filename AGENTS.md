@@ -37,7 +37,7 @@ See `CONTEXT.md` for canonical terms. Key ones:
 - **`DowngradeApiVersionPolicy`** — intercepts SDK requests on on-prem to rewrite `7.1-preview` → configured version (e.g. `6.0`)
 - **`OnPremFallback` trait** — direct HTTP GET bypassing the SDK for on-prem quirks; `get(path)` + `get_with_api_version(path, version)` methods
 - **`InMemoryAzureClient`** — test double implementing `AzureDevOpsClient` with in-memory collections
-- **Operations layer** — `WorkItemOperations`, `ProjectLookup`, `QueryOperations` (split per ADR-0010)
+- **Operations layer** — `WorkItemOperations`, `LinkOperations`, `CommentOperations`, `ProjectLookup`, `QueryOperations` (split per ADR-0010 and ADR-0011)
 - **`AdoMcpHandler`** — MCP handler routing `Tool` variants to operations; parity test enforces `Tool ⊇ CliCommand`
 
 ### Built-in agent skills
@@ -118,7 +118,9 @@ changes.
 | `crates/azure_devops_client/src/resilience.rs` | `RetryStrategy`, `OnPremFallback`, `ProductionFallback`, `NoOpFallback` |
 | `crates/azure_devops_client/src/api_version_policy.rs` | `DowngradeApiVersionPolicy` |
 | `crates/rusty_azure_devops/src/tools.rs` | `Tool` enum, `AdoMcpHandler`, MCP tool definitions |
-| `crates/rusty_azure_devops/src/operations/work_item.rs` | `WorkItemOperations` (create, update, link, get, search, comments) |
+| `crates/rusty_azure_devops/src/operations/work_item.rs` | `WorkItemOperations` (create, update, get, search) |
+| `crates/rusty_azure_devops/src/operations/link.rs` | `LinkOperations` (manage_work_item_link) |
+| `crates/rusty_azure_devops/src/operations/comment.rs` | `CommentOperations` (get_workitem_comments, add_comment) |
 | `crates/rusty_azure_devops/src/operations/project.rs` | `ProjectLookup` (list_projects, get_status) |
 | `crates/rusty_azure_devops/src/operations/query.rs` | `QueryOperations` (get_query) |
 | `crates/rusty_azure_devops/src/operations/helpers.rs` | Shared micro-helpers (normalize_description_to_markdown, etc.) |
