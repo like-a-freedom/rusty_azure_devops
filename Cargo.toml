@@ -6,12 +6,10 @@ resolver = "3"
 version = "0.7.0"
 edition = "2024"
 license = "MIT"
-repository = "https://github.com/<your-org>/rusty_azure_devops"
-homepage = "https://github.com/<your-org>/rusty_azure_devops"
+repository = "https://github.com/like-a-freedom/rusty_azure_devops"
 readme = "README.md"
 keywords = ["azure-devops", "mcp", "cli", "work-items", "tfs"]
 categories = ["api-bindings", "development-tools", "asynchronous"]
-publish = false
 
 [workspace.metadata]
 name = "rusty-azure-devops"
