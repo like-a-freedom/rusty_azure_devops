@@ -15,6 +15,11 @@
    cargo clippy --all-targets --all-features -- -D warnings
    cargo test --workspace
    ```
+   The CI clippy step denies warnings, and cargo reports manifest problems as
+   warnings. A green local run does not prove CI is green: the CI toolchain
+   can be newer than yours and flag lints your cargo does not emit. If the
+   release workflow fails in the checks job, read the clippy log before
+   re-tagging.
 3. **Update `CHANGELOG.md`** with the release notes (see the format below).
 4. **Commit:** `chore: release vX.Y.Z`.
 5. **Tag** the release commit: `git tag vX.Y.Z`.
@@ -26,6 +31,11 @@
 
 The tag must point at the released commit. Push the commit before the tag so a
 failed push never leaves a tag pointing at something nobody can fetch.
+
+Publishing the release fires the `release: created` event, which starts the
+build workflow. It compiles the binaries for every release platform and
+attaches them to the release as assets. Wait for that workflow to finish
+before announcing the release.
 
 ## Release notes format
 
