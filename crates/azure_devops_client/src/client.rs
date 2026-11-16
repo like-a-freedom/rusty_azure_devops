@@ -777,11 +777,40 @@ impl AzureDevOpsClient for AzureSdkClient {
 }
 
 impl AzureSdkClient {
+    /// The project the work item comments API needs.
+    ///
+    /// `GET /{collection}/{project}/_apis/wit/workItems/{id}/comments` requires
+    /// the project segment; without it the on-prem server answers 404, even
+    /// when the work item has no comments. The configured default project wins.
+    /// When there is none, ask the work item, which reports its project in
+    /// `System.TeamProject`.
+    async fn comments_project(&self, work_item_id: i64) -> Result<String, AzureError> {
+        const TEAM_PROJECT: &str = "System.TeamProject";
+
+        let configured = self.effective_project();
+        if !configured.trim().is_empty() {
+            return Ok(configured);
+        }
+
+        let wi = self
+            .get_work_item(work_item_id, Some(&[TEAM_PROJECT]), None)
+            .await?;
+        wi.fields
+            .get(TEAM_PROJECT)
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                AzureError::Config(format!(
+                    "the work item comments API needs a project, and work item {work_item_id} reports no {TEAM_PROJECT}. Set ADO_DEFAULT_PROJECT to a project name."
+                ))
+            })
+    }
+
     /// On-prem: comments API requires `6.0-preview` but the SDK's
     /// `DowngradeApiVersionPolicy` rewrites `7.1-preview` → `6.0`.  Bypass
     /// the SDK and hit the REST endpoint directly via the fallback.
     async fn get_comments_on_prem(&self, work_item_id: i64) -> Result<Vec<Comment>, AzureError> {
-        let project = self.effective_project();
+        let project = self.comments_project(work_item_id).await?;
         let path = format!("{}/_apis/wit/workItems/{}/comments", project, work_item_id,);
         let val = self
             .fallback
@@ -819,7 +848,7 @@ impl AzureSdkClient {
 
     async fn get_comments_sdk(&self, work_item_id: i64) -> Result<Vec<Comment>, AzureError> {
         let org = self.effective_org();
-        let project = self.effective_project();
+        let project = self.comments_project(work_item_id).await?;
         let id32 = work_item_id_to_sdk_id(work_item_id)?;
         let creq = self
             .retry
