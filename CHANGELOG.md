@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-11-16
+
+### Changed
+- Dependency upgrades to the latest versions: rmcp 3.9.0 -> 3.10.0, rand 0.10.3 -> 0.10.4, jsonschema 0.61.0 -> 0.61.2, plus transitive lockfile updates (rpassword 7.5.5, cc, mio, rustls-webpki, crc32fast, and others). No source changes were required.
+
+### Fixed
+- `ado-cli get-work-item --comments` and `ado-cli comments` failed with a `404` on any on-prem server without `ADO_DEFAULT_PROJECT`. The comments API requires the project in the URL; the client now uses the configured default project, or reads `System.TeamProject` from the work item, and names `ADO_DEFAULT_PROJECT` when neither is available.
+- `ado-cli get-work-item --expand Comments` resolved the wrong project, so it could still ask for an endpoint without a project segment. It now uses the project from the work item it already fetched.
+- `ado-cli add-comment` on an on-prem server never reached the discussion thread. The comments API accepts only `api-version=6.0-preview`, the SDK sent `6.0`, and every failure was swallowed into a `System.History` field patch. The client now posts to the thread directly.
+- `ado-cli add-comment` fell back to `System.History` even when the cause was a missing project, hiding the one error the user can fix. Only an unreachable comments API now reaches the fallback; a missing project is reported with the variable to set.
+- A comment could be posted twice when a write failed in a way that did not prove the server had rejected it. The client now retries a write only after an authentication rejection, and treats an unreadable success response as success.
+- The `ado-cli search` examples in the README and the shipped skills used `--project`, which the command does not accept. The project is the first positional argument. A new test runs every documented command line through the CLI's parser, so a documented flag that does not exist now fails the build.
+
 ## [0.7.0] - 2026-11-14
 
 ### Added
@@ -17,13 +30,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - `ado-cli skills path` ended without a trailing newline, which ran its output into the next shell prompt.
-
-## [Unreleased]
-
-### Fixed
-- `ado-cli get-work-item --comments` and `ado-cli comments` failed with a `404` on any on-prem server without `ADO_DEFAULT_PROJECT`. The comments API requires the project in the URL; the client now uses the configured default project, or reads `System.TeamProject` from the work item, and names `ADO_DEFAULT_PROJECT` when neither is available.
-- `ado-cli add-comment` on an on-prem server never reached the discussion thread. The comments API accepts only `api-version=6.0-preview`, the SDK sent `6.0`, and every failure was swallowed into a `System.History` field patch. The client now posts to the thread directly.
-- The `ado-cli search` examples in the README and the shipped skills used `--project`, which the command does not accept. The project is the first positional argument. A new test runs every documented command line through the CLI's parser, so a documented flag that does not exist now fails the build.
 
 ## [0.6.0] - 2026-11-09
 
