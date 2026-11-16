@@ -14,10 +14,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Documentation refreshed across `README.md`, `CONTEXT.md`, `AGENTS.md`, `CONTRIBUTING.md`, `SECURITY.md`, `docs/SPEC.md`, `docs/RELEASE.md`, and the ADRs. The specification's requirements are renumbered to remove a duplicate `FR-5`, and the architecture section now describes the crates and modules as they exist.
-- The README's `ado-cli search` example used a positional project argument. The project is the `--project` flag, so the example now matches the CLI.
 
 ### Fixed
 - `ado-cli skills path` ended without a trailing newline, which ran its output into the next shell prompt.
+
+## [Unreleased]
+
+### Fixed
+- `ado-cli get-work-item --comments` and `ado-cli comments` failed with a `404` on any on-prem server without `ADO_DEFAULT_PROJECT`. The comments API requires the project in the URL; the client now uses the configured default project, or reads `System.TeamProject` from the work item, and names `ADO_DEFAULT_PROJECT` when neither is available.
+- `ado-cli add-comment` on an on-prem server never reached the discussion thread. The comments API accepts only `api-version=6.0-preview`, the SDK sent `6.0`, and every failure was swallowed into a `System.History` field patch. The client now posts to the thread directly.
+- The `ado-cli search` examples in the README and the shipped skills used `--project`, which the command does not accept. The project is the first positional argument. A new test runs every documented command line through the CLI's parser, so a documented flag that does not exist now fails the build.
 
 ## [0.6.0] - 2026-11-09
 

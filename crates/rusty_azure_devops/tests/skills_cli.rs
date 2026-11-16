@@ -7,7 +7,20 @@ use predicates::prelude::*;
 /// so the embedded catalog is what gets tested.
 fn ado_cli() -> Command {
     let mut cmd = Command::cargo_bin("ado-cli").unwrap();
-    cmd.env_remove("ADO_TOKEN")
+    // A throwaway HOME: `ado-cli logout` deletes the user config, and a test
+    // must never be able to reach the developer's real one.
+    let home = std::env::temp_dir().join(format!(
+        "ado-skills-cli-home-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    ));
+    std::fs::create_dir_all(&home).ok();
+    cmd.env("HOME", &home)
+        .env("USERPROFILE", &home)
+        .env_remove("ADO_TOKEN")
         .env_remove("ADO_BASE_URL")
         .env_remove("ADO_ORGANIZATION")
         .env_remove("ADO_API_VERSION")

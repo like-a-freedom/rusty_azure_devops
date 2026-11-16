@@ -38,7 +38,7 @@ The CLI ships this guide, so it always matches the installed version.
 | Projects | `ado-cli list-projects --json` |
 | Work item by ID | `ado-cli get-work-item <ID> --json` |
 | Description, relations, comments | add `--description`, `--expand relations`, or `--comments` |
-| WIQL search | `ado-cli search --project <P> --wiql "<WIQL>" --details --json` |
+| WIQL search | `ado-cli search <P> --wiql "<WIQL>" --details --json` |
 | Create a work item | `ado-cli create-work-item --project <P> --type <T> --title "<T>"` |
 | Update fields | `ado-cli update-work-item <ID> --field '<KEY>=<VALUE>'` |
 | Read the discussion | `ado-cli comments <ID> --json` |

@@ -12,7 +12,7 @@ ado-cli get-work-item 42 --json
 ado-cli create-work-item --project P --type Task --title T
 ado-cli update-work-item 42 --field 'System.Tags=urgent'
 ado-cli manage-link add 42 43 --link-type System.LinkTypes.Related
-ado-cli search --project P --wiql "SELECT [Id] FROM WorkItems" --details
+ado-cli search P --wiql "SELECT [Id] FROM WorkItems" --details
 ado-cli comments 42 --json
 ado-cli add-comment 42 'Build passed'
 ado-cli get-query-results --project P --query-id GUID
@@ -109,8 +109,8 @@ value.
 and the target are positional:
 
 ```
-ado-cli manage-link add <SOURCE_ID> <TARGET> --link-type <TYPE> --comment <REASON>
-ado-cli manage-link remove <SOURCE_ID> <TARGET> [--link-type <TYPE>]
+ado-cli manage-link add 42 43 --link-type System.LinkTypes.Related --comment linked
+ado-cli manage-link remove 42 43 --link-type System.LinkTypes.Related
 ```
 
 Link types: `System.LinkTypes.Related` (the default),
@@ -126,7 +126,7 @@ Runs a WIQL query. `--project` defaults to the configured default project.
 `--details` returns full records instead of IDs. `--limit` caps the result
 count. `--description` includes `System.Description`.
 
-The project is the `--project` **flag**, not a positional argument.
+The project is the first positional argument. `--project` is not a flag on this command.
 
 ### `ado-cli comments` and `ado-cli add-comment`
 

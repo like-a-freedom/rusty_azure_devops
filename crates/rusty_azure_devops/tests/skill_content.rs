@@ -283,3 +283,95 @@ fn the_advertised_skills_are_the_ones_that_ship() {
     let names: Vec<&str> = catalog.skills.iter().map(|s| s.name.as_str()).collect();
     assert_eq!(names, ["core", "on-prem"]);
 }
+
+/// Split a documented command line the way a shell would: whitespace outside
+/// quotes separates words, and the quote characters are removed.
+fn split_shell_like(line: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut quote: Option<char> = None;
+    for ch in line.chars() {
+        match (quote, ch) {
+            (None, '"') | (None, '\'') => quote = Some(ch),
+            (Some(q), c) if c == q => quote = None,
+            (Some(_), c) => word.push(c),
+            (None, c) if c.is_whitespace() => {
+                if !word.is_empty() {
+                    words.push(std::mem::take(&mut word));
+                }
+            }
+            (None, c) => word.push(c),
+        }
+    }
+    if !word.is_empty() {
+        words.push(word);
+    }
+    words
+}
+
+/// Every command line the skill documents must actually parse.
+///
+/// The command-map guard in `schema_validation.rs` checks names only, so a
+/// documented flag that does not exist slipped through: the map said
+/// `ado-cli search --project P` while `search` takes the project positionally,
+/// and the invocation failed with "unexpected argument" on a green build.
+///
+/// A clap usage error exits 2. Anything else means clap accepted the
+/// arguments, whatever the command did next.
+#[test]
+fn every_documented_command_line_parses() {
+    let commands = core_reference("references/commands.md");
+    let lines: Vec<&str> = commands
+        .lines()
+        .filter_map(|line| line.trim_start().strip_prefix("ado-cli "))
+        .collect();
+    assert!(
+        lines.len() >= 13,
+        "expected the whole command map, found {} lines",
+        lines.len()
+    );
+
+    // Hermetic HOME. The map documents `ado-cli login` and `ado-cli logout`,
+    // and logout deletes `$HOME/.config/rusty_azure_devops/config.yaml`. Run
+    // these against a throwaway HOME or the developer's real credentials are
+    // destroyed by a test run.
+    let home = std::env::temp_dir().join(format!(
+        "ado-skill-doc-parse-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    ));
+    std::fs::create_dir_all(&home).expect("temp HOME");
+
+    let mut failures = Vec::new();
+    for line in lines {
+        let args = split_shell_like(line);
+        assert!(!args.is_empty(), "empty documented line: {line:?}");
+        let out = assert_cmd::Command::cargo_bin("ado-cli")
+            .expect("ado-cli builds")
+            .env("HOME", &home)
+            .env("USERPROFILE", &home)
+            .env_remove("ADO_TOKEN")
+            .env_remove("ADO_BASE_URL")
+            .env_remove("ADO_DEFAULT_PROJECT")
+            .env_remove("ADO_CLI_SKILLS_DIR")
+            .args(&args)
+            .output()
+            .expect("ado-cli runs");
+        if out.status.code() == Some(2) {
+            failures.push(format!(
+                "`ado-cli {line}` -> {}\n{}",
+                out.status,
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+    }
+    std::fs::remove_dir_all(&home).ok();
+    assert!(
+        failures.is_empty(),
+        "documented command lines that do not parse:\n{}",
+        failures.join("\n\n")
+    );
+}

@@ -253,8 +253,8 @@ ado-cli update-work-item 123 --patch '[{"op":"add","path":"/fields/System.Tags",
 ado-cli manage-link add 100 101 --link-type System.LinkTypes.Related
 ado-cli manage-link remove 100 101
 
-# Search (the project is a flag, not a positional argument)
-ado-cli search --project Demo --wiql "SELECT [System.Id] FROM WorkItems WHERE [System.State] = 'Active'" --details
+# Search (the project is the first positional argument)
+ado-cli search Demo --wiql "SELECT [System.Id] FROM WorkItems WHERE [System.State] = 'Active'" --details
 
 # Comments
 ado-cli comments 123

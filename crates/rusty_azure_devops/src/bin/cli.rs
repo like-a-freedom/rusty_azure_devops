@@ -255,7 +255,7 @@ enum Command {
         comment: Option<String>,
     },
 
-    #[doc = "Search work items using WIQL (Work Item Query Language).\nReturns IDs by default; add --details for full records.\n--project defaults to configured default project if omitted.\n\nExamples:\n  ado-cli search\n  ado-cli search --project MyProject --details\n  ado-cli search --wiql \"SELECT [Id] FROM WorkItems WHERE [State] = 'Active'\" --details\n  ado-cli search --wiql \"SELECT [Id] FROM WorkItems WHERE [System.Title] CONTAINS 'foo' AND [System.TeamProject] = 'MyProject'\""]
+    #[doc = "Search work items using WIQL (Work Item Query Language).\nReturns IDs by default; add --details for full records.\nPROJECT defaults to the configured default project if omitted.\n\nExamples:\n  ado-cli search\n  ado-cli search MyProject --details\n  ado-cli search --wiql \"SELECT [Id] FROM WorkItems WHERE [State] = 'Active'\" --details\n  ado-cli search --wiql \"SELECT [Id] FROM WorkItems WHERE [System.Title] CONTAINS 'foo' AND [System.TeamProject] = 'MyProject'\""]
     Search {
         /// Project name. Defaults to configured default project if omitted.
         project: Option<String>,
