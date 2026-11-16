@@ -130,7 +130,7 @@ How the client adapts to transient transport instability: retries failed SDK cal
 _Avoid_: retry logic, retry handler
 
 **OnPremFallback**:
-How the client bypasses the Azure SDK when it cannot parse on-prem Azure DevOps Server responses: a direct HTTP GET that iterates API versions × 2 auth-header variants (`:PAT` and `user:PAT` Basic). One-method interface (`get(path) -> Result<serde_json::Value>`). Substituted independently of `RetryStrategy`; `Option<Arc<dyn OnPremFallback>>` on `AzureSdkClient` — `None` for cloud URLs (which never fall back), `Some(ProductionFallback)` for on-prem. Test adapter `NoOpFallback` returns `NotImplemented`.
+How the client bypasses the Azure SDK for on-prem Azure DevOps Server: a direct HTTP request that iterates API versions × 2 auth-header variants (`:PAT` and `user:PAT` Basic). Three methods: `get(path)` walks the configured API versions, `get_with_api_version(path, version)` pins one, and `post_json(path, version, body)` writes when only a specific version works (the comments API accepts `6.0-preview` alone). Substituted independently of `RetryStrategy`; `Option<Arc<dyn OnPremFallback>>` on `AzureSdkClient` — `None` for cloud URLs (which never fall back), `Some(ProductionFallback)` for on-prem. Test adapter `NoOpFallback` returns `NotImplemented`.
 _Avoid_: fallback handler, on-prem GET, fallback_get (use the trait method name)
 
 **SDK Error Heuristic**:

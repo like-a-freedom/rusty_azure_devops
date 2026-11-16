@@ -725,6 +725,16 @@ impl AzureDevOpsClient for AzureSdkClient {
         work_item_id: i64,
         comment: &Comment,
     ) -> Result<Comment, AzureError> {
+        // On-prem must bypass the SDK: it sends `7.1-preview`, the downgrade
+        // policy rewrites it to `6.0`, and the comments API accepts only
+        // `6.0-preview`. That failure used to be invisible, because every
+        // error fell through to the `System.History` patch below.
+        if self.base_contains_collection
+            && let Ok(created) = self.add_comment_on_prem(work_item_id, comment).await
+        {
+            return Ok(created);
+        }
+
         let mut cc = wit::models::CommentCreate::new();
         cc.text = Some(comment.text.clone());
         let org = self.effective_org();
@@ -804,6 +814,44 @@ impl AzureSdkClient {
                     "the work item comments API needs a project, and work item {work_item_id} reports no {TEAM_PROJECT}. Set ADO_DEFAULT_PROJECT to a project name."
                 ))
             })
+    }
+
+    /// Post a comment to the discussion thread on-prem.
+    ///
+    /// Mirrors [`Self::get_comments_on_prem`]: the comments API needs the
+    /// project in the path and the `6.0-preview` api-version.
+    async fn add_comment_on_prem(
+        &self,
+        work_item_id: i64,
+        comment: &Comment,
+    ) -> Result<Comment, AzureError> {
+        let project = self.comments_project(work_item_id).await?;
+        let path = format!("{}/_apis/wit/workItems/{}/comments", project, work_item_id);
+        let body = serde_json::json!({ "text": comment.text });
+        let val = self
+            .fallback
+            .as_ref()
+            .expect("on-prem fallback required")
+            .post_json(&path, "6.0-preview", &body)
+            .await?;
+        Ok(Comment {
+            id: val.get("id").and_then(|v| v.as_i64()),
+            author: val
+                .get("createdBy")
+                .and_then(|r| r.get("displayName"))
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+            text: val
+                .get("text")
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .unwrap_or(comment.text.as_str())
+                .to_string(),
+            created_at: val
+                .get("createdDate")
+                .and_then(|v| v.as_str())
+                .map(str::to_string),
+        })
     }
 
     /// On-prem: comments API requires `6.0-preview` but the SDK's

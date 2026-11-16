@@ -32,6 +32,18 @@ pub trait OnPremFallback: Send + Sync + 'static {
         path: &'a str,
         api_version: &'a str,
     ) -> BoxFuture<'a, serde_json::Value>;
+
+    /// POST a JSON body at an explicit api-version.
+    ///
+    /// The work item comments API only accepts `6.0-preview`, which the SDK's
+    /// downgrade policy rewrites away, so writing a comment on-prem has to
+    /// bypass the SDK the same way reading one does.
+    fn post_json<'a>(
+        &'a self,
+        path: &'a str,
+        api_version: &'a str,
+        body: &'a serde_json::Value,
+    ) -> BoxFuture<'a, serde_json::Value>;
 }
 
 /// Simple, reusable retry policy with exponential backoff and jitter.
@@ -194,52 +206,76 @@ impl ProductionFallback {
             api
         )
     }
+
+    /// Send one request at one api-version, trying each auth-header variant.
+    ///
+    /// `body` selects POST when present and GET when absent. Returns the parsed
+    /// JSON body, or one error line per attempted variant.
+    async fn send_json(
+        &self,
+        path: &str,
+        api_version: &str,
+        body: Option<&serde_json::Value>,
+    ) -> Result<serde_json::Value, Vec<String>> {
+        let client = match self.client_for_request() {
+            Ok(client) => client,
+            Err(e) => return Err(vec![format!("{api_version} -> {e}")]),
+        };
+        let url = Self::on_prem_url(&self.endpoint, path, api_version);
+        let auth_variants = [format!(":{}", self.pat), format!("user:{}", self.pat)];
+        let mut errors: Vec<String> = Vec::new();
+        for auth_val in auth_variants.iter() {
+            let auth = format!(
+                "Basic {}",
+                base64::engine::general_purpose::STANDARD.encode(auth_val)
+            );
+            let request = match body {
+                Some(json) => client.post(&url).json(json),
+                None => client.get(&url),
+            };
+            let resp_res = request
+                .header(reqwest::header::AUTHORIZATION, auth)
+                .header(
+                    reqwest::header::USER_AGENT,
+                    "azsdk-rust-devops_rust_api/0.32.0",
+                )
+                .header(reqwest::header::ACCEPT, "application/json; charset=utf-8")
+                .send()
+                .await;
+            match resp_res {
+                Err(_) => {
+                    errors.push(format!("{api_version} -> request failed"));
+                    continue;
+                }
+                Ok(resp) => {
+                    let status = resp.status();
+                    let body_text = resp.text().await.unwrap_or_default();
+                    if !status.is_success() {
+                        errors.push(format!("{api_version} -> HTTP {status}"));
+                        continue;
+                    }
+                    match serde_json::from_str::<serde_json::Value>(&body_text) {
+                        Ok(v) => return Ok(v),
+                        Err(_) => {
+                            errors.push(format!("{api_version} -> invalid JSON response"));
+                            continue;
+                        }
+                    }
+                }
+            }
+        }
+        Err(errors)
+    }
 }
 
 impl OnPremFallback for ProductionFallback {
     fn get<'a>(&'a self, path: &'a str) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
-            let client = self.client_for_request()?;
             let mut errors: Vec<String> = Vec::new();
             for api in self.api_versions.iter() {
-                let url_s = Self::on_prem_url(&self.endpoint, path, api);
-                let auth_variants = [format!(":{}", self.pat), format!("user:{}", self.pat)];
-                for auth_val in auth_variants.iter() {
-                    let auth = format!(
-                        "Basic {}",
-                        base64::engine::general_purpose::STANDARD.encode(auth_val)
-                    );
-                    let resp_res = client
-                        .get(&url_s)
-                        .header(reqwest::header::AUTHORIZATION, auth)
-                        .header(
-                            reqwest::header::USER_AGENT,
-                            "azsdk-rust-devops_rust_api/0.32.0",
-                        )
-                        .header(reqwest::header::ACCEPT, "application/json; charset=utf-8")
-                        .send()
-                        .await;
-                    match resp_res {
-                        Err(_) => {
-                            errors.push(format!("{api} -> request failed"));
-                            continue;
-                        }
-                        Ok(resp) => {
-                            let status = resp.status();
-                            let body_text = resp.text().await.unwrap_or_default();
-                            if !status.is_success() {
-                                errors.push(format!("{api} -> HTTP {status}"));
-                                continue;
-                            }
-                            match serde_json::from_str::<serde_json::Value>(&body_text) {
-                                Ok(v) => return Ok(v),
-                                Err(_) => {
-                                    errors.push(format!("{api} -> invalid JSON response"));
-                                    continue;
-                                }
-                            }
-                        }
-                    }
+                match self.send_json(path, api, None).await {
+                    Ok(v) => return Ok(v),
+                    Err(mut e) => errors.append(&mut e),
                 }
             }
             Err(AzureError::Http(crate::http_error::HttpError::fallback(
@@ -254,50 +290,22 @@ impl OnPremFallback for ProductionFallback {
         api_version: &'a str,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
-            let client = self.client_for_request()?;
-            let url_s = Self::on_prem_url(&self.endpoint, path, api_version);
-            let auth_variants = [format!(":{}", self.pat), format!("user:{}", self.pat)];
-            let mut errors: Vec<String> = Vec::new();
-            for auth_val in auth_variants.iter() {
-                let auth = format!(
-                    "Basic {}",
-                    base64::engine::general_purpose::STANDARD.encode(auth_val)
-                );
-                let resp_res = client
-                    .get(&url_s)
-                    .header(reqwest::header::AUTHORIZATION, auth)
-                    .header(
-                        reqwest::header::USER_AGENT,
-                        "azsdk-rust-devops_rust_api/0.32.0",
-                    )
-                    .header(reqwest::header::ACCEPT, "application/json; charset=utf-8")
-                    .send()
-                    .await;
-                match resp_res {
-                    Err(_) => {
-                        errors.push(format!("{api_version} -> request failed"));
-                        continue;
-                    }
-                    Ok(resp) => {
-                        let status = resp.status();
-                        let body_text = resp.text().await.unwrap_or_default();
-                        if !status.is_success() {
-                            errors.push(format!("{api_version} -> HTTP {status}"));
-                            continue;
-                        }
-                        match serde_json::from_str::<serde_json::Value>(&body_text) {
-                            Ok(v) => return Ok(v),
-                            Err(_) => {
-                                errors.push(format!("{api_version} -> invalid JSON response"));
-                                continue;
-                            }
-                        }
-                    }
-                }
-            }
-            Err(AzureError::Http(crate::http_error::HttpError::fallback(
-                errors,
-            )))
+            self.send_json(path, api_version, None)
+                .await
+                .map_err(|errors| AzureError::Http(crate::http_error::HttpError::fallback(errors)))
+        })
+    }
+
+    fn post_json<'a>(
+        &'a self,
+        path: &'a str,
+        api_version: &'a str,
+        body: &'a serde_json::Value,
+    ) -> BoxFuture<'a, serde_json::Value> {
+        Box::pin(async move {
+            self.send_json(path, api_version, Some(body))
+                .await
+                .map_err(|errors| AzureError::Http(crate::http_error::HttpError::fallback(errors)))
         })
     }
 }
@@ -320,6 +328,14 @@ pub struct NoOpFallback;
 
 impl OnPremFallback for NoOpFallback {
     fn get<'a>(&'a self, _path: &'a str) -> BoxFuture<'a, serde_json::Value> {
+        Box::pin(async { Err(AzureError::NotImplemented) })
+    }
+    fn post_json<'a>(
+        &'a self,
+        _path: &'a str,
+        _api_version: &'a str,
+        _body: &'a serde_json::Value,
+    ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async { Err(AzureError::NotImplemented) })
     }
     fn get_with_api_version<'a>(
