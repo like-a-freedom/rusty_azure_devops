@@ -7,6 +7,17 @@ use crate::{
 use azure_devops_rust_api::Credential;
 use azure_devops_rust_api::wit;
 
+/// The field every work item response carries its project in.
+const TEAM_PROJECT: &str = "System.TeamProject";
+/// The only api-version the work item comments API accepts.
+const COMMENTS_API_VERSION: &str = "6.0-preview";
+
+fn missing_project_error(work_item_id: i64) -> AzureError {
+    AzureError::Config(format!(
+        "the work item comments API needs a project, and work item {work_item_id} reports no {TEAM_PROJECT}. Set ADO_DEFAULT_PROJECT to a project name."
+    ))
+}
+
 /// Adapter that implements `AzureDevOpsClient` using `azure_devops_rust_api` and
 /// separate retry + on-prem fallback strategies.
 #[derive(Clone)]
@@ -472,7 +483,11 @@ impl AzureDevOpsClient for AzureSdkClient {
             || expand_str.eq_ignore_ascii_case("All")
         {
             let org = self.effective_org();
-            let project = self.effective_project();
+            // The response in hand already carries `System.TeamProject`, so no
+            // second fetch is needed here.
+            let project = self
+                .known_comments_project(Some(&resp.fields))
+                .ok_or_else(|| missing_project_error(id))?;
             let creq = self
                 .retry
                 .retry_policy()
@@ -725,14 +740,22 @@ impl AzureDevOpsClient for AzureSdkClient {
         work_item_id: i64,
         comment: &Comment,
     ) -> Result<Comment, AzureError> {
+        work_item_id_to_sdk_id(work_item_id)?;
+
         // On-prem must bypass the SDK: it sends `7.1-preview`, the downgrade
         // policy rewrites it to `6.0`, and the comments API accepts only
         // `6.0-preview`. That failure used to be invisible, because every
         // error fell through to the `System.History` patch below.
-        if self.base_contains_collection
-            && let Ok(created) = self.add_comment_on_prem(work_item_id, comment).await
-        {
-            return Ok(created);
+        if self.base_contains_collection {
+            match self.add_comment_on_prem(work_item_id, comment).await {
+                Ok(created) => return Ok(created),
+                // The comments API being unreachable is the documented case
+                // for the history fallback below.
+                Err(AzureError::Http(_)) => {}
+                // A missing project cannot be fixed by the fallback, and it is
+                // the one case the user can act on.
+                Err(other) => return Err(other),
+            }
         }
 
         let mut cc = wit::models::CommentCreate::new();
@@ -794,26 +817,36 @@ impl AzureSdkClient {
     /// when the work item has no comments. The configured default project wins.
     /// When there is none, ask the work item, which reports its project in
     /// `System.TeamProject`.
-    async fn comments_project(&self, work_item_id: i64) -> Result<String, AzureError> {
-        const TEAM_PROJECT: &str = "System.TeamProject";
-
+    /// The project the comments API needs, from what is already at hand.
+    ///
+    /// The configured default project wins. Otherwise `fields` may carry
+    /// `System.TeamProject`, which every work item response does when the
+    /// caller fetched that field (it is in the default set, and always present
+    /// when the server ignores a `fields` filter).
+    fn known_comments_project(&self, fields: Option<&serde_json::Value>) -> Option<String> {
         let configured = self.effective_project();
         if !configured.trim().is_empty() {
-            return Ok(configured);
+            return Some(configured.trim().to_string());
         }
+        fields
+            .and_then(|f| f.get(TEAM_PROJECT))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    }
 
+    /// The project the comments API needs, asking the work item when the
+    /// configuration and the caller's fields do not carry it.
+    async fn comments_project(&self, work_item_id: i64) -> Result<String, AzureError> {
+        if let Some(project) = self.known_comments_project(None) {
+            return Ok(project);
+        }
         let wi = self
             .get_work_item(work_item_id, Some(&[TEAM_PROJECT]), None)
             .await?;
-        wi.fields
-            .get(TEAM_PROJECT)
-            .and_then(|v| v.as_str())
-            .map(str::to_string)
-            .ok_or_else(|| {
-                AzureError::Config(format!(
-                    "the work item comments API needs a project, and work item {work_item_id} reports no {TEAM_PROJECT}. Set ADO_DEFAULT_PROJECT to a project name."
-                ))
-            })
+        self.known_comments_project(Some(&wi.fields))
+            .ok_or_else(|| missing_project_error(work_item_id))
     }
 
     /// Post a comment to the discussion thread on-prem.
@@ -831,8 +864,8 @@ impl AzureSdkClient {
         let val = self
             .fallback
             .as_ref()
-            .expect("on-prem fallback required")
-            .post_json(&path, "6.0-preview", &body)
+            .ok_or_else(|| AzureError::Config("on-prem fallback is not configured".to_string()))?
+            .post_json(&path, COMMENTS_API_VERSION, &body)
             .await?;
         Ok(Comment {
             id: val.get("id").and_then(|v| v.as_i64()),
@@ -864,7 +897,7 @@ impl AzureSdkClient {
             .fallback
             .as_ref()
             .expect("on-prem fallback required")
-            .get_with_api_version(&path, "6.0-preview")
+            .get_with_api_version(&path, COMMENTS_API_VERSION)
             .await?;
         let comments_arr = val
             .get("comments")

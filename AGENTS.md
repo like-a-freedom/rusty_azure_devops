@@ -102,10 +102,10 @@ ado-cli skills get on-prem
 ```
 
 The skill carries the full quirk matrix: the `$expand`/`fields` conflict,
-`expand=Comments` being unsupported, the comments API version, the
-`System.History` fallback, and the API-version downgrade policy. Keep that
-skill as the single source of truth and change it here only when the skill
-changes.
+`expand=Comments` being unsupported, the comments API version, the project
+segment the comments endpoint requires, the `System.History` fallback, and the
+API-version downgrade policy. Keep that skill as the single source of truth and
+change it here only when the skill changes.
 
 ### Key Files
 

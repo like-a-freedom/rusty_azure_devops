@@ -198,9 +198,11 @@ output:
 ```
 
 Comments: MCP reads and writes comments through the Work Item Comments API (the preferred way). Behavior:
-- In `create_work_item`, when `comments` are provided, MCP first creates the WI, then calls the Comments API for each comment (POST `/wit/workItems/{id}/comments`).
-- `get_work_item` with `$expand=Comments` returns comments from the Comments API (including author, text, and timestamp).
-- For simplicity and backward compatibility, MCP also supports writing short comments through JSON Patch (appending to the `System.History` field), but the Comments API is recommended.
+- The comments endpoint is `GET|POST /{collection}/{project}/_apis/wit/workItems/{id}/comments`. It needs the project segment: without it the server answers 404, even for a work item with an empty thread. The client uses `ADO_DEFAULT_PROJECT` when set, and otherwise reads `System.TeamProject` from the work item. When neither yields a project it fails with an actionable error rather than a bare 404.
+- On on-prem servers this endpoint accepts only `api-version=6.0-preview`, while the SDK sends `7.1-preview` and the downgrade policy rewrites it to the configured version. The client therefore bypasses the SDK for comment reads and writes on-prem.
+- In `create_work_item`, when `comments` are provided, MCP first creates the WI, then calls the Comments API for each comment (POST `/workItems/{id}/comments`).
+- `get_work_item` with `$expand=Comments` returns comments from the Comments API (including author, text, and timestamp) where the server supports the expansion. On-prem rejects `$expand=Comments`, so read the thread with `get_workitem_comments` there.
+- For simplicity and backward compatibility, MCP also supports writing short comments through JSON Patch (appending to the `System.History` field), but the Comments API is recommended. This fallback is a last resort for an unreachable comments API; a missing project is reported instead.
 
 `get_work_item` — input:
 ```json

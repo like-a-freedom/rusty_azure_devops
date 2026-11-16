@@ -213,16 +213,14 @@ impl ProductionFallback {
     /// JSON body, or one error line per attempted variant.
     async fn send_json(
         &self,
+        client: &reqwest::Client,
         path: &str,
         api_version: &str,
         body: Option<&serde_json::Value>,
     ) -> Result<serde_json::Value, Vec<String>> {
-        let client = match self.client_for_request() {
-            Ok(client) => client,
-            Err(e) => return Err(vec![format!("{api_version} -> {e}")]),
-        };
         let url = Self::on_prem_url(&self.endpoint, path, api_version);
         let auth_variants = [format!(":{}", self.pat), format!("user:{}", self.pat)];
+        let is_write = body.is_some();
         let mut errors: Vec<String> = Vec::new();
         for auth_val in auth_variants.iter() {
             let auth = format!(
@@ -245,22 +243,34 @@ impl ProductionFallback {
             match resp_res {
                 Err(_) => {
                     errors.push(format!("{api_version} -> request failed"));
+                    // A write may already have reached the server; retrying
+                    // with the other auth variant can duplicate it.
+                    if is_write {
+                        break;
+                    }
                     continue;
                 }
                 Ok(resp) => {
                     let status = resp.status();
                     let body_text = resp.text().await.unwrap_or_default();
-                    if !status.is_success() {
-                        errors.push(format!("{api_version} -> HTTP {status}"));
-                        continue;
-                    }
-                    match serde_json::from_str::<serde_json::Value>(&body_text) {
-                        Ok(v) => return Ok(v),
-                        Err(_) => {
-                            errors.push(format!("{api_version} -> invalid JSON response"));
-                            continue;
+                    if status.is_success() {
+                        match serde_json::from_str::<serde_json::Value>(&body_text) {
+                            Ok(v) => return Ok(v),
+                            // The write succeeded; only the echo is unreadable.
+                            // Reporting a failure here would re-send it.
+                            Err(_) if is_write => return Ok(serde_json::Value::Null),
+                            Err(_) => {
+                                errors.push(format!("{api_version} -> invalid JSON response"));
+                                continue;
+                            }
                         }
                     }
+                    errors.push(format!("{api_version} -> HTTP {status}"));
+                    // Only an auth rejection justifies the other header.
+                    if is_write && !matches!(status.as_u16(), 401 | 403) {
+                        break;
+                    }
+                    continue;
                 }
             }
         }
@@ -271,9 +281,13 @@ impl ProductionFallback {
 impl OnPremFallback for ProductionFallback {
     fn get<'a>(&'a self, path: &'a str) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
+            let client = match self.client_for_request() {
+                Ok(client) => client,
+                Err(e) => return Err(e),
+            };
             let mut errors: Vec<String> = Vec::new();
             for api in self.api_versions.iter() {
-                match self.send_json(path, api, None).await {
+                match self.send_json(&client, path, api, None).await {
                     Ok(v) => return Ok(v),
                     Err(mut e) => errors.append(&mut e),
                 }
@@ -290,7 +304,11 @@ impl OnPremFallback for ProductionFallback {
         api_version: &'a str,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
-            self.send_json(path, api_version, None)
+            let client = match self.client_for_request() {
+                Ok(client) => client,
+                Err(e) => return Err(e),
+            };
+            self.send_json(&client, path, api_version, None)
                 .await
                 .map_err(|errors| AzureError::Http(crate::http_error::HttpError::fallback(errors)))
         })
@@ -303,7 +321,11 @@ impl OnPremFallback for ProductionFallback {
         body: &'a serde_json::Value,
     ) -> BoxFuture<'a, serde_json::Value> {
         Box::pin(async move {
-            self.send_json(path, api_version, Some(body))
+            let client = match self.client_for_request() {
+                Ok(client) => client,
+                Err(e) => return Err(e),
+            };
+            self.send_json(&client, path, api_version, Some(body))
                 .await
                 .map_err(|errors| AzureError::Http(crate::http_error::HttpError::fallback(errors)))
         })

@@ -176,3 +176,100 @@ async fn add_comment_on_prem_posts_to_the_thread_at_the_preview_version() {
         "the comment must not fall back to a field patch"
     );
 }
+
+/// A missing project must surface on the write path too. The history fallback
+/// cannot fix it, and it is the one case the user can act on.
+#[tokio::test]
+async fn add_comment_reports_a_missing_project_instead_of_writing_history() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/tfs/DefaultCollection/_apis/wit/workitems/42"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 42,
+            "rev": 1,
+            "url": "http://example.local/tfs/DefaultCollection/_apis/wit/workItems/42",
+            "fields": { "System.Title": "t" }
+        })))
+        .mount(&server)
+        .await;
+
+    let comment = azure_devops_client::Comment {
+        id: None,
+        author: None,
+        text: "hello".to_string(),
+        created_at: None,
+    };
+    let err = client_for(&server)
+        .add_comment(42, &comment)
+        .await
+        .expect_err("a project cannot be derived");
+    assert!(
+        err.to_string().contains("ADO_DEFAULT_PROJECT"),
+        "the actionable error must survive: {err}"
+    );
+    assert!(
+        !server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .any(|r| r.method == wiremock::http::Method::PATCH),
+        "a missing project must not be papered over with a field patch"
+    );
+}
+
+/// A project name with a space must survive the trip into the URL.
+#[tokio::test]
+async fn a_project_name_with_a_space_is_encoded() {
+    let server = MockServer::start().await;
+    mount_work_item_with_project(&server, "Vulnerability Research").await;
+    Mock::given(method("GET"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "totalCount": 0, "count": 0, "comments": []
+        })))
+        .mount(&server)
+        .await;
+
+    let comments = client_for(&server)
+        .get_comments(42)
+        .await
+        .expect("the space is encoded, not dropped");
+    assert!(comments.is_empty());
+
+    let paths: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.url.path().to_string())
+        .collect();
+    assert!(
+        paths
+            .iter()
+            .any(|p| p.contains("/Vulnerability%20Research/_apis/wit/workItems/42/comments")),
+        "the project segment must be percent-encoded, not dropped: {paths:?}"
+    );
+}
+
+/// A configured project means exactly one request, and it is the comments call.
+#[tokio::test]
+async fn a_configured_project_costs_exactly_one_request() {
+    let server = MockServer::start().await;
+    mount_comments(&server, "Configured").await;
+
+    let client = AzureSdkClient::builder(
+        format!("{}/tfs/DefaultCollection", server.uri()),
+        "token",
+        "org",
+    )
+    .project("Configured")
+    .build()
+    .expect("loopback HTTP mock endpoint");
+
+    client.get_comments(42).await.expect("comments resolve");
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        1,
+        "a configured project must not add a lookup request"
+    );
+}
