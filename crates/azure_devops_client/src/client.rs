@@ -1369,7 +1369,7 @@ mod regression_tests {
             .api_version("6.0")
             .build()
             .expect("loopback HTTP mock endpoint");
-        let result = client.query_by_id("Corp-SecurityCenter", "q1").await;
+        let result = client.query_by_id("MyProject", "q1").await;
         assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
         assert_eq!(result.unwrap(), vec![8243728, 10729324]);
     }

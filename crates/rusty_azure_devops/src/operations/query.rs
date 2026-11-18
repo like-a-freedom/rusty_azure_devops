@@ -161,11 +161,11 @@ mod tests {
     #[test]
     fn test_parse_query_url_edit_form() {
         let result = parse_query_url(
-            "https://hqrndtfs.avp.ru/tfs/DefaultCollection/Corp-SecurityCenter/_queries/query-edit/5b8ca874-776d-4bff-ba1e-0eaab60fa29c/",
+            "https://tfs.example.com/tfs/DefaultCollection/MyProject/_queries/query-edit/11111111-2222-4333-8444-555555555555/",
         );
         let (project, query_id) = result.unwrap();
-        assert_eq!(project, "Corp-SecurityCenter");
-        assert_eq!(query_id, "5b8ca874-776d-4bff-ba1e-0eaab60fa29c");
+        assert_eq!(project, "MyProject");
+        assert_eq!(query_id, "11111111-2222-4333-8444-555555555555");
     }
 
     #[test]
