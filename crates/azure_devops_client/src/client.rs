@@ -152,8 +152,15 @@ impl AzureSdkClientBuilder {
         let path = endpoint_url.path().to_lowercase();
         let base_contains_collection =
             path.contains("/tfs/") || path.contains("/defaultcollection");
+        // ADR-0005: on-prem servers accept at most `6.0`, and the SDK hardcodes
+        // `7.1-preview`. Without an explicit version the target must be `6.0`;
+        // picking the SDK's own `7.1-preview` makes the downgrade a no-op and
+        // turns every SDK-only call (create, update, wiql, batch) into a 400
+        // `VssVersionOutOfRangeException`, while the fallback paths that probe
+        // every version keep working and hide the breakage.
         let api_versions = match self.api_version {
             Some(v) => vec![v],
+            None if base_contains_collection => vec!["6.0".into()],
             None => vec!["7.1-preview".into(), "7.0".into(), "6.0".into()],
         };
 
@@ -1256,7 +1263,7 @@ mod regression_tests {
         let mock = MockServer::start().await;
         let endpoint = format!("{}/tfs/DefaultCollection", mock.uri());
 
-        // Without custom api-version, ProductionResilience tries 7.1-preview, 7.0, 6.0
+        // Without custom api-version, the on-prem default is 6.0
         // Each with two auth variants.
         // Mount broad mock matching any GET on the projects endpoint (any api-version).
         Mock::given(method("GET"))

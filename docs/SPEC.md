@@ -156,7 +156,7 @@ The CLI follows the same path, from clap arguments to the same operations, so th
 - Use the `rmcp` crate for the stdio transport and the server logic (details below, under "Notes on `rmcp`").
 - `AzureDevOpsClient` as a trait for easily testable mock/fake implementations.
 - Retry/backoff and the on-prem fallback are two separate seams in `azure_devops_client::resilience`.
-- The `api-version` is a parameterizable configuration setting.
+- The `api-version` is a parameterizable configuration setting. On an on-prem endpoint (one with a collection in the path) it defaults to `6.0`: the SDK hardcodes `7.1-preview`, on-prem servers reject anything above `6.0`, and pinning the SDK's own version would make the downgrade a no-op (ADR-0005).
 - The skill content is embedded at compile time, so it is rebuilt and re-versioned with the CLI it describes.
 
 ### Crates in use

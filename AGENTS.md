@@ -35,7 +35,7 @@ See `CONTEXT.md` for canonical terms. Key ones:
 - **`AzureSdkClient`** — implementation using `azure_devops_rust_api` SDK; holds `retry: Arc<dyn RetryStrategy>` (required) + `fallback: Option<Arc<dyn OnPremFallback>>` (`None` for cloud, `Some(ProductionFallback)` for on-prem)
 - **`AzureSdkClientBuilder`** — single constructor replacing prior `new`/`with_resilience`; URL parsing, SDK construction, `DowngradeApiVersionPolicy` attachment
 - **`DowngradeApiVersionPolicy`** — intercepts SDK requests on on-prem to rewrite `7.1-preview` → configured version (e.g. `6.0`)
-- **`OnPremFallback` trait** — direct HTTP GET bypassing the SDK for on-prem quirks; `get(path)` + `get_with_api_version(path, version)` methods
+- **`OnPremFallback` trait** — direct HTTP bypassing the SDK for on-prem quirks; `get(path)` walks the configured API versions, `get_with_api_version(path, version)` pins one, and `post_json(path, version, body)` writes when only a specific version works
 - **`InMemoryAzureClient`** — test double implementing `AzureDevOpsClient` with in-memory collections
 - **Operations layer** — `WorkItemOperations`, `LinkOperations`, `CommentOperations`, `ProjectLookup`, `QueryOperations` (split per ADR-0010 and ADR-0011)
 - **`AdoMcpHandler`** — MCP handler routing `Tool` variants to operations; parity test enforces `Tool ⊇ CliCommand`
