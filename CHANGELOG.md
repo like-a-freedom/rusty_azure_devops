@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.2] - 2026-11-18
 
 ### Fixed
 - On an on-prem server, `ado-cli create-work-item`, `ado-cli update-work-item` and `ado-cli search` failed with `VssVersionOutOfRangeException: The requested REST API version of 7.1 is out of range` whenever the config carried no `ado_api_version`, while reads kept working. The downgrade policy took its target from the first candidate version, which is the SDK's own `7.1-preview`, so it rewrote nothing; on-prem now defaults to `6.0` as ADR-0005 specifies, and setting `ADO_API_VERSION` still overrides it.
